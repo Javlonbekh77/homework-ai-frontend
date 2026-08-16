@@ -1,5 +1,8 @@
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-const BASE_URL = normalizeApiBaseUrl(configuredBaseUrl || "http://localhost:8000/api");
+const fallbackBaseUrl = import.meta.env.DEV
+  ? "http://localhost:8000/api"
+  : "https://homework-ai-backend-mots.onrender.com/api";
+const BASE_URL = normalizeApiBaseUrl(configuredBaseUrl || fallbackBaseUrl);
 
 function normalizeApiBaseUrl(url: string) {
   const cleanUrl = url.replace(/\/$/, "");
