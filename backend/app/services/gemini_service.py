@@ -18,8 +18,13 @@ from .prompts import (
 )
 from .schemas import BookExtractionResult, HomeworkEvaluationResult
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_TIMEOUT_SECONDS = 60
+MODEL_REPLACEMENTS = {
+    "gemini-2.5-flash": "gemini-3.6-flash",
+    "gemini-2.5-flash-lite": "gemini-3.5-flash-lite",
+}
+FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -134,10 +139,10 @@ def _get_timeout_seconds() -> int:
 def _get_model_names() -> list[str]:
     raw_model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip()
     configured_model = raw_model.removeprefix("models/") if raw_model else DEFAULT_MODEL
+    configured_model = MODEL_REPLACEMENTS.get(configured_model, configured_model)
 
-    model_names = [configured_model]
-    if configured_model != DEFAULT_MODEL:
-        model_names.append(DEFAULT_MODEL)
+    model_names = [configured_model, *FALLBACK_MODELS]
+    model_names = list(dict.fromkeys(model_names))
     return model_names
 
 
@@ -152,7 +157,6 @@ def _build_config(
         response_mime_type="application/json",
         response_schema=schema,
         response_json_schema=response_json_schema,
-        temperature=0.1,
     )
 
 
