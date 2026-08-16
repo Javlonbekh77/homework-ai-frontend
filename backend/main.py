@@ -8,7 +8,7 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from contextlib import asynccontextmanager
 
-from app.services.firebase_service import init_firebase
+from app.services.firebase_service import get_firebase_error, init_firebase, is_firebase_ready
 from app.api import auth, classes, users, homeworks
 from app.bot.handlers import router as bot_router
 
@@ -29,7 +29,10 @@ def env_flag(name: str, default: bool = False) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    init_firebase()
+    try:
+        init_firebase()
+    except Exception:
+        logging.exception("Firebase initialization failed. API endpoints will fail until Firebase env is fixed.")
     
     global bot
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -60,7 +63,11 @@ app.include_router(homeworks.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "firebase_ready": is_firebase_ready(),
+        "firebase_error": get_firebase_error(),
+    }
 
 
 if __name__ == "__main__":
