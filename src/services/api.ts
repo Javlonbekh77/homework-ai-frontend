@@ -203,3 +203,11 @@ export async function getTeacherHomeworks(userId: string) {
   if (!res.ok) throw new Error("Failed to fetch teacher homeworks");
   return res.json();
 }
+
+export async function getTeacherDashboard(userId: string) {
+  const res = await fetch(`${BASE_URL}/teacher/dashboard`, {
+    headers: { "x-user-id": userId }
+  });
+  if (!res.ok) throw new Error("Failed to fetch teacher dashboard");
+  return res.json();
+}

@@ -42,6 +42,7 @@ import {
   submitHomework,
   updateRole,
   getClassStudents,
+  getTeacherDashboard,
   getTeacherHomeworks,
 } from "./services/api";
 
@@ -134,6 +135,102 @@ type Submission = {
   };
 };
 
+type TeacherDashboardSummary = {
+  class_count: number;
+  subject_count: number;
+  student_count: number;
+  homework_count: number;
+  published_homework_count: number;
+  submission_count: number;
+  submitted_student_count: number;
+  average_score: number;
+  average_percentage: number;
+  coverage_percent: number;
+};
+
+type TeacherDashboardClass = {
+  id: string;
+  name: string;
+  subject: string;
+  join_code?: string;
+  student_count: number;
+  homework_count: number;
+  published_homework_count: number;
+  submission_count: number;
+  submitted_student_count: number;
+  average_score: number;
+  average_percentage: number;
+  coverage_percent: number;
+  last_submission_at?: string | null;
+};
+
+type TeacherDashboardSubject = {
+  subject: string;
+  class_count: number;
+  student_count: number;
+  homework_count: number;
+  published_homework_count: number;
+  submission_count: number;
+  submitted_student_count: number;
+  average_score: number;
+  average_percentage: number;
+  coverage_percent: number;
+  last_submission_at?: string | null;
+};
+
+type TeacherDashboardHomework = {
+  id: string;
+  class_id?: string;
+  class_name: string;
+  title: string;
+  subject: string;
+  status?: string;
+  student_count: number;
+  submission_count: number;
+  submitted_student_count: number;
+  average_score: number;
+  average_percentage: number;
+  coverage_percent: number;
+  created_at?: string | null;
+  last_submission_at?: string | null;
+};
+
+type TeacherDashboardStudent = {
+  id: string;
+  full_name: string;
+  telegram_username?: string | null;
+  class_ids: string[];
+  classes: { id: string; name: string; subject: string }[];
+  assigned_homework_count: number;
+  submitted_homework_count: number;
+  submission_count: number;
+  average_score: number;
+  average_percentage: number;
+  coverage_percent: number;
+  last_submission_at?: string | null;
+};
+
+type TeacherDashboardSubmission = Submission & {
+  homework_id: string;
+  homework_title: string;
+  class_id?: string;
+  class_name: string;
+  subject: string;
+  student_id?: string;
+  student_name: string;
+  telegram_username?: string | null;
+};
+
+type TeacherDashboard = {
+  generated_at?: string;
+  summary: TeacherDashboardSummary;
+  classes: TeacherDashboardClass[];
+  subjects: TeacherDashboardSubject[];
+  homeworks: TeacherDashboardHomework[];
+  students: TeacherDashboardStudent[];
+  submissions: TeacherDashboardSubmission[];
+};
+
 type AuthResponse = {
   user: User;
 };
@@ -182,6 +279,22 @@ function scoreText(submission: Submission) {
   return `${submission.score}/${maxScore}`;
 }
 
+function metricNumber(value?: number) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function metricPercent(value?: number) {
+  return `${Math.round(value ?? 0)}%`;
+}
+
+function shortDate(value?: string | null) {
+  if (!value) return "Hali yo'q";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Hali yo'q";
+  return date.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short" });
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
@@ -209,6 +322,11 @@ export default function App() {
   const [studentSubmissionsByHomework, setStudentSubmissionsByHomework] = useState<Record<string, Submission[]>>({});
   const [teacherSubmissionHomeworkId, setTeacherSubmissionHomeworkId] = useState("");
   const [teacherSubmissions, setTeacherSubmissions] = useState<Submission[]>([]);
+  const [teacherDashboard, setTeacherDashboard] = useState<TeacherDashboard | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardClassId, setDashboardClassId] = useState("");
+  const [dashboardSubject, setDashboardSubject] = useState("");
+  const [dashboardStudentId, setDashboardStudentId] = useState("");
   
   // Teacher Class Detail States
   const [selectedTeacherClassId, setSelectedTeacherClassId] = useState("");
@@ -230,6 +348,28 @@ export default function App() {
     setHomeworks(list);
   }, []);
 
+  const loadTeacherAnalytics = useCallback(async (userId: string) => {
+    setDashboardLoading(true);
+    try {
+      const analytics = (await getTeacherDashboard(userId)) as TeacherDashboard;
+      setTeacherDashboard(analytics);
+      setDashboardClassId((current) => (
+        current && analytics.classes.some((item) => item.id === current)
+          ? current
+          : analytics.classes[0]?.id || ""
+      ));
+      setDashboardSubject((current) => (
+        current && analytics.subjects.some((item) => item.subject === current) ? current : ""
+      ));
+      setDashboardStudentId((current) => (
+        current && analytics.students.some((item) => item.id === current) ? current : ""
+      ));
+      return analytics;
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, []);
+
   const loadDashboard = useCallback(
     async (nextUser: User, preferredClassId = "") => {
       if (!nextUser.role) return;
@@ -248,7 +388,10 @@ export default function App() {
           } else {
             setHomeworks([]);
           }
-          const allHws = (await getTeacherHomeworks(nextUser.id)) as Homework[];
+          const [allHws] = await Promise.all([
+            getTeacherHomeworks(nextUser.id) as Promise<Homework[]>,
+            loadTeacherAnalytics(nextUser.id),
+          ]);
           setAllTeacherHomeworks(allHws);
         } else {
           const list = (await getStudentHomeworks(nextUser.id)) as Homework[];
@@ -261,7 +404,7 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [loadTeacherHomeworks],
+    [loadTeacherAnalytics, loadTeacherHomeworks],
   );
 
   useEffect(() => {
@@ -395,6 +538,7 @@ export default function App() {
       await loadTeacherHomeworks(user.id, activeClassId);
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -420,6 +564,7 @@ export default function App() {
       }
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -442,6 +587,7 @@ export default function App() {
       }
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -465,6 +611,7 @@ export default function App() {
       }
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
@@ -1028,7 +1175,6 @@ export default function App() {
     }
 
     // HOME TAB
-    const totalStudents = classes.reduce((acc, c) => acc + (c.student_count || 0), 0);
     const unapprovedHws = allTeacherHomeworks.filter(h => !h.answer_key_approved);
     const draftHws = allTeacherHomeworks.filter(h => h.status === "draft" && h.answer_key_approved);
     
@@ -1046,30 +1192,7 @@ export default function App() {
           </p>
         </div>
 
-        <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "1.5rem" }}>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <School size={24} color="var(--primary)" style={{ marginBottom: "8px" }} />
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>{classes.length} ta</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Sinflar jami</p>
-          </div>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <UsersRound size={24} color="var(--secondary)" style={{ marginBottom: "8px" }} />
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>{totalStudents} nafar</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>O'quvchilar jami</p>
-          </div>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <ClipboardList size={24} color="#8b5cf6" style={{ marginBottom: "8px" }} />
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>{allTeacherHomeworks.length} ta</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Berilgan vazifalar</p>
-          </div>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <div style={{ width: "24px", height: "24px", borderRadius: "50%", border: "3px solid var(--warning)", display: "grid", placeItems: "center", fontSize: "0.65rem", fontWeight: 800, color: "var(--warning)", marginBottom: "8px" }}>
-              %
-            </div>
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>82%</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>O'rtacha o'zlashtirish</p>
-          </div>
-        </div>
+        {renderTeacherAnalyticsDashboard()}
 
         <div style={{ marginBottom: "0.75rem" }}>
           <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>E'tiborga muhtoj</h3>
@@ -1146,6 +1269,266 @@ export default function App() {
           + Yangi vazifa yaratish
         </button>
       </div>
+    );
+  }
+
+  function renderTeacherAnalyticsDashboard() {
+    if (dashboardLoading && !teacherDashboard) {
+      return (
+        <section className="dashboard-loading">
+          <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} />
+          <span>Statistikalar yuklanmoqda...</span>
+        </section>
+      );
+    }
+
+    if (!teacherDashboard) {
+      return <div className="empty-state compact">Dashboard ma'lumotlari hali yuklanmadi.</div>;
+    }
+
+    const dashboard = teacherDashboard;
+    const summary = dashboard.summary;
+    const selectedDashClass = dashboard.classes.find((item) => item.id === dashboardClassId);
+    const selectedDashStudent = dashboard.students.find((item) => item.id === dashboardStudentId);
+    const filteredHomeworks = dashboard.homeworks.filter((homework) => (
+      (!dashboardClassId || homework.class_id === dashboardClassId) &&
+      (!dashboardSubject || homework.subject === dashboardSubject)
+    ));
+    const filteredStudents = dashboard.students.filter((student) => (
+      (!dashboardClassId || student.class_ids.includes(dashboardClassId)) &&
+      (!dashboardSubject || student.classes.some((item) => item.subject === dashboardSubject))
+    ));
+    const filteredSubmissions = dashboard.submissions.filter((submission) => (
+      (!dashboardClassId || submission.class_id === dashboardClassId) &&
+      (!dashboardSubject || submission.subject === dashboardSubject) &&
+      (!dashboardStudentId || submission.student_id === dashboardStudentId)
+    ));
+    const visibleSubmissions = selectedDashStudent ? filteredSubmissions : filteredSubmissions.slice(0, 6);
+    const detailTitle = selectedDashStudent
+      ? selectedDashStudent.full_name
+      : selectedDashClass?.name || dashboardSubject || "Barcha sinflar";
+
+    return (
+      <section className="teacher-dashboard">
+        <div className="dashboard-head">
+          <div>
+            <p className="eyebrow">Teacher dashboard</p>
+            <h3>Real statistikalar</h3>
+          </div>
+          <button
+            className="icon-btn"
+            type="button"
+            title="Dashboardni yangilash"
+            disabled={dashboardLoading || !user}
+            onClick={() => user && void loadDashboard(user, selectedClassId)}
+          >
+            <RefreshCcw size={17} />
+          </button>
+        </div>
+
+        <div className="stat-grid dashboard-kpis">
+          <div className="stat-card dashboard-kpi">
+            <School size={22} color="var(--primary)" />
+            <div className="stat-value">{metricNumber(summary.class_count)}</div>
+            <p>Sinflar</p>
+          </div>
+          <div className="stat-card dashboard-kpi">
+            <UsersRound size={22} color="var(--secondary)" />
+            <div className="stat-value">{metricNumber(summary.student_count)}</div>
+            <p>O'quvchilar</p>
+          </div>
+          <div className="stat-card dashboard-kpi">
+            <ClipboardList size={22} color="#7c3aed" />
+            <div className="stat-value">{metricNumber(summary.submission_count)}</div>
+            <p>Yuborilgan ishlar</p>
+          </div>
+          <div className="stat-card dashboard-kpi">
+            <TrendingUp size={22} color="var(--warning)" />
+            <div className="stat-value">{metricPercent(summary.average_percentage)}</div>
+            <p>O'rtacha natija</p>
+          </div>
+        </div>
+
+        <div className="dashboard-metrics-strip">
+          <span>{summary.published_homework_count}/{summary.homework_count} vazifa nashrda</span>
+          <span>{summary.submitted_student_count} o'quvchi topshirgan</span>
+          <span>{metricPercent(summary.coverage_percent)} faollik</span>
+        </div>
+
+        <div className="dashboard-block">
+          <div className="dashboard-section-title">
+            <h4>Sinf kesimi</h4>
+            {dashboardClassId ? (
+              <button className="text-btn" type="button" onClick={() => setDashboardClassId("")}>
+                Barchasi
+              </button>
+            ) : null}
+          </div>
+          <div className="dashboard-card-grid">
+            {dashboard.classes.map((item) => (
+              <button
+                className={`dashboard-card-btn ${dashboardClassId === item.id ? "active" : ""}`}
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  const nextClassId = dashboardClassId === item.id ? "" : item.id;
+                  setDashboardClassId(nextClassId);
+                  setDashboardStudentId("");
+                  if (nextClassId && dashboardSubject && item.subject !== dashboardSubject) {
+                    setDashboardSubject("");
+                  }
+                }}
+              >
+                <span className="dashboard-card-title">{item.name}</span>
+                <span className="dashboard-card-subtitle">{item.subject}</span>
+                <span className="dashboard-card-meta">
+                  {item.student_count} o'quvchi - {metricPercent(item.average_percentage)}
+                </span>
+                <span className="mini-progress" aria-hidden="true">
+                  <span style={{ width: metricPercent(item.coverage_percent) }} />
+                </span>
+              </button>
+            ))}
+          </div>
+          {!dashboard.classes.length ? (
+            <div className="empty-state compact">Hali sinf yaratilmagan.</div>
+          ) : null}
+        </div>
+
+        <div className="dashboard-block">
+          <div className="dashboard-section-title">
+            <h4>Fan kesimi</h4>
+            {dashboardSubject ? (
+              <button className="text-btn" type="button" onClick={() => setDashboardSubject("")}>
+                Tozalash
+              </button>
+            ) : null}
+          </div>
+          <div className="dashboard-card-grid">
+            {dashboard.subjects.map((item) => (
+              <button
+                className={`dashboard-card-btn subject ${dashboardSubject === item.subject ? "active" : ""}`}
+                key={item.subject}
+                type="button"
+                onClick={() => {
+                  const nextSubject = dashboardSubject === item.subject ? "" : item.subject;
+                  setDashboardSubject(nextSubject);
+                  setDashboardStudentId("");
+                  if (nextSubject) {
+                    setDashboardClassId("");
+                  }
+                }}
+              >
+                <span className="dashboard-card-title">{item.subject}</span>
+                <span className="dashboard-card-subtitle">{item.class_count} sinf</span>
+                <span className="dashboard-card-meta">
+                  {item.submission_count} ish - {metricPercent(item.average_percentage)}
+                </span>
+                <span className="mini-progress" aria-hidden="true">
+                  <span style={{ width: metricPercent(item.coverage_percent) }} />
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="dashboard-two-col">
+          <section className="dashboard-panel">
+            <div className="dashboard-section-title">
+              <h4>Vazifalar</h4>
+              <span>{filteredHomeworks.length} ta</span>
+            </div>
+            <div className="dashboard-list">
+              {filteredHomeworks.slice(0, 8).map((homework) => (
+                <div className="dashboard-row" key={homework.id}>
+                  <div>
+                    <strong>{homework.title}</strong>
+                    <span>{homework.class_name} - {homework.subject}</span>
+                  </div>
+                  <div className="dashboard-row-metric">
+                    <b>{metricPercent(homework.coverage_percent)}</b>
+                    <span>{homework.submitted_student_count}/{homework.student_count}</span>
+                  </div>
+                </div>
+              ))}
+              {!filteredHomeworks.length ? (
+                <div className="empty-state compact">Bu kesimda vazifa yo'q.</div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="dashboard-panel">
+            <div className="dashboard-section-title">
+              <h4>O'quvchilar</h4>
+              <span>{filteredStudents.length} nafar</span>
+            </div>
+            <div className="dashboard-list">
+              {filteredStudents.slice(0, 10).map((student) => (
+                <button
+                  className={`student-drill-row ${dashboardStudentId === student.id ? "active" : ""}`}
+                  key={student.id}
+                  type="button"
+                  onClick={() => setDashboardStudentId(dashboardStudentId === student.id ? "" : student.id)}
+                >
+                  <span className="student-avatar">{initials(student.full_name) || "?"}</span>
+                  <span>
+                    <strong>{student.full_name}</strong>
+                    <small>
+                      {student.telegram_username ? `@${student.telegram_username}` : "Username yo'q"} - {student.submitted_homework_count}/{student.assigned_homework_count}
+                    </small>
+                  </span>
+                  <b>{metricPercent(student.average_percentage)}</b>
+                </button>
+              ))}
+              {!filteredStudents.length ? (
+                <div className="empty-state compact">Bu kesimda o'quvchi topilmadi.</div>
+              ) : null}
+            </div>
+          </section>
+        </div>
+
+        <section className="dashboard-panel dashboard-submissions-panel">
+          <div className="dashboard-section-title">
+            <div>
+              <h4>{detailTitle}</h4>
+              <p>Yuborgan ishlar va saqlangan AI feedbacklar</p>
+            </div>
+            {dashboardStudentId ? (
+              <button className="text-btn" type="button" onClick={() => setDashboardStudentId("")}>
+                O'quvchini yopish
+              </button>
+            ) : null}
+          </div>
+
+          <div className="dashboard-submissions-list">
+            {visibleSubmissions.map((submission) => {
+              const feedback = submission.grading_result?.general_feedback;
+              return (
+                <article className="dashboard-submission" key={submission.id}>
+                  <div className="dashboard-submission-head">
+                    <div>
+                      <strong>{submission.student_name}</strong>
+                      <span>{submission.homework_title} - {submission.class_name} - {submission.subject}</span>
+                    </div>
+                    <div>
+                      <b>{scoreText(submission)}</b>
+                      <small>{shortDate(submission.submitted_at)}</small>
+                    </div>
+                  </div>
+                  {feedback ? (
+                    <p>{feedback.length > 180 ? `${feedback.slice(0, 180)}...` : feedback}</p>
+                  ) : (
+                    <p>AI feedback mavjud emas yoki hali qayta yuklanmagan.</p>
+                  )}
+                </article>
+              );
+            })}
+            {!visibleSubmissions.length ? (
+              <div className="empty-state compact">Hali yuborilgan ish yo'q.</div>
+            ) : null}
+          </div>
+        </section>
+      </section>
     );
   }
 

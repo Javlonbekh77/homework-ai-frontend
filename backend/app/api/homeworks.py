@@ -12,6 +12,68 @@ from .users import get_current_user
 
 router = APIRouter()
 
+
+def _as_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _average(values) -> float:
+    clean_values = [_as_float(value) for value in values if value is not None]
+    return round(sum(clean_values) / len(clean_values), 1) if clean_values else 0.0
+
+
+def _percent(part: int, total: int) -> float:
+    return round((part / total) * 100, 1) if total else 0.0
+
+
+def _date_key(value) -> float:
+    if hasattr(value, "timestamp"):
+        return float(value.timestamp())
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _latest_attempts(rows):
+    latest = {}
+    for row in rows:
+        homework_id = row.get("homework_id")
+        student_id = row.get("student_id")
+        if not homework_id or not student_id:
+            continue
+
+        key = (homework_id, student_id)
+        current_rank = (_date_key(row.get("submitted_at")), _as_float(row.get("attempt_number")))
+        previous = latest.get(key)
+        previous_rank = (
+            _date_key(previous.get("submitted_at")),
+            _as_float(previous.get("attempt_number")),
+        ) if previous else (-1.0, -1.0)
+
+        if current_rank >= previous_rank:
+            latest[key] = row
+
+    return list(latest.values())
+
+
+def _score_values(rows, key: str):
+    return [row.get(key) for row in rows if isinstance(row.get(key), (int, float))]
+
+
+def _latest_at(rows):
+    if not rows:
+        return None
+    return max((row.get("submitted_at") for row in rows), key=_date_key)
+
+
 # ----------------- TEACHER ENDPOINTS -----------------
 
 @router.post("/classes/{class_id}/homeworks")
@@ -57,6 +119,273 @@ async def list_teacher_homeworks(current_user: dict = Depends(get_current_user))
     db = get_db()
     hw_docs = db.collection("homeworks").where("teacher_id", "==", current_user["id"]).stream()
     return [{"id": h.id, **h.to_dict()} for h in hw_docs]
+
+
+@router.get("/teacher/dashboard")
+async def get_teacher_dashboard(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can view dashboard")
+
+    db = get_db()
+    teacher_id = current_user["id"]
+
+    class_docs = list(db.collection("classes").where("teacher_id", "==", teacher_id).stream())
+    class_map = {}
+    student_ids = set()
+    student_classes = {}
+
+    for doc in class_docs:
+        data = doc.to_dict()
+        class_map[doc.id] = {
+            "id": doc.id,
+            "name": data.get("name") or "Nomsiz sinf",
+            "subject": data.get("subject") or "Noma'lum fan",
+            "join_code": data.get("join_code"),
+            "created_at": data.get("created_at"),
+            "student_ids": set(),
+            "homework_ids": [],
+        }
+
+    for class_id, class_data in class_map.items():
+        members = db.collection("class_members").where("class_id", "==", class_id).stream()
+        for member in members:
+            member_data = member.to_dict()
+            if member_data.get("status", "active") != "active":
+                continue
+            student_id = member_data.get("student_id")
+            if not student_id:
+                continue
+            class_data["student_ids"].add(student_id)
+            student_ids.add(student_id)
+            student_classes.setdefault(student_id, set()).add(class_id)
+
+    student_map = {}
+    for student_id in student_ids:
+        student_doc = db.collection("users").document(student_id).get()
+        if student_doc.exists:
+            student_map[student_id] = student_doc.to_dict()
+
+    homework_docs = list(db.collection("homeworks").where("teacher_id", "==", teacher_id).stream())
+    homework_map = {}
+    for doc in homework_docs:
+        data = doc.to_dict()
+        class_id = data.get("class_id")
+        if class_id and class_id in class_map:
+            class_map[class_id]["homework_ids"].append(doc.id)
+
+        homework_map[doc.id] = {
+            "id": doc.id,
+            "class_id": class_id,
+            "title": data.get("title") or "Nomsiz vazifa",
+            "description": data.get("description"),
+            "subject": data.get("subject") or class_map.get(class_id, {}).get("subject") or "Noma'lum fan",
+            "status": data.get("status") or "draft",
+            "max_score": data.get("max_score", 10),
+            "created_at": data.get("created_at"),
+            "published_at": data.get("published_at"),
+            "answer_key_approved": data.get("answer_key_approved", False),
+        }
+
+    submission_rows = []
+    for homework_id, homework in homework_map.items():
+        submissions = db.collection("submissions").where("homework_id", "==", homework_id).stream()
+        for submission in submissions:
+            data = submission.to_dict()
+            student_id = data.get("student_id")
+            class_id = data.get("class_id") or homework.get("class_id")
+            class_data = class_map.get(class_id, {})
+            student_data = student_map.get(student_id, {})
+            max_score = data.get("max_score") or homework.get("max_score") or 10
+            score = data.get("score")
+            percentage = data.get("percentage")
+            if percentage is None and isinstance(score, (int, float)) and max_score:
+                percentage = (score / max_score) * 100
+
+            submission_rows.append({
+                "id": submission.id,
+                "homework_id": homework_id,
+                "homework_title": homework.get("title"),
+                "class_id": class_id,
+                "class_name": class_data.get("name") or "Noma'lum sinf",
+                "subject": homework.get("subject") or class_data.get("subject") or "Noma'lum fan",
+                "student_id": student_id,
+                "student_name": student_data.get("full_name") or "Noma'lum o'quvchi",
+                "telegram_username": student_data.get("telegram_username"),
+                "attempt_number": data.get("attempt_number", 1),
+                "score": score,
+                "max_score": max_score,
+                "percentage": percentage,
+                "status": data.get("status"),
+                "submitted_at": data.get("submitted_at"),
+                "grading_result": data.get("grading_result"),
+            })
+
+    submission_rows.sort(
+        key=lambda row: (_date_key(row.get("submitted_at")), _as_float(row.get("attempt_number"))),
+        reverse=True,
+    )
+    latest_rows = _latest_attempts(submission_rows)
+    published_latest_rows = [
+        row for row in latest_rows
+        if homework_map.get(row.get("homework_id"), {}).get("status") == "published"
+    ]
+
+    total_possible_submissions = sum(
+        len(class_map.get(homework.get("class_id"), {}).get("student_ids", set()))
+        for homework in homework_map.values()
+        if homework.get("status") == "published"
+    )
+
+    class_stats = []
+    for class_id, class_data in class_map.items():
+        class_homeworks = [
+            homework_map[homework_id]
+            for homework_id in class_data["homework_ids"]
+            if homework_id in homework_map
+        ]
+        class_latest = [row for row in latest_rows if row.get("class_id") == class_id]
+        class_attempts = [row for row in submission_rows if row.get("class_id") == class_id]
+        published_homework_ids = {
+            homework["id"] for homework in class_homeworks if homework.get("status") == "published"
+        }
+        submitted_pairs = {
+            (row.get("homework_id"), row.get("student_id"))
+            for row in class_latest
+            if row.get("homework_id") in published_homework_ids
+        }
+        possible = len(class_data["student_ids"]) * len(published_homework_ids)
+
+        class_stats.append({
+            "id": class_id,
+            "name": class_data["name"],
+            "subject": class_data["subject"],
+            "join_code": class_data.get("join_code"),
+            "student_count": len(class_data["student_ids"]),
+            "homework_count": len(class_homeworks),
+            "published_homework_count": len(published_homework_ids),
+            "submission_count": len(class_attempts),
+            "submitted_student_count": len({row.get("student_id") for row in class_latest if row.get("student_id")}),
+            "average_score": _average(_score_values(class_latest, "score")),
+            "average_percentage": _average(_score_values(class_latest, "percentage")),
+            "coverage_percent": _percent(len(submitted_pairs), possible),
+            "last_submission_at": _latest_at(class_attempts),
+        })
+
+    subject_names = sorted({data["subject"] for data in class_map.values()} | {hw["subject"] for hw in homework_map.values()})
+    subject_stats = []
+    for subject in subject_names:
+        subject_class_ids = {class_id for class_id, data in class_map.items() if data.get("subject") == subject}
+        subject_homeworks = [hw for hw in homework_map.values() if hw.get("subject") == subject]
+        subject_latest = [row for row in latest_rows if row.get("subject") == subject]
+        subject_attempts = [row for row in submission_rows if row.get("subject") == subject]
+        published_homework_ids = {hw["id"] for hw in subject_homeworks if hw.get("status") == "published"}
+        subject_students = set()
+        for class_id in subject_class_ids:
+            subject_students.update(class_map[class_id]["student_ids"])
+        submitted_pairs = {
+            (row.get("homework_id"), row.get("student_id"))
+            for row in subject_latest
+            if row.get("homework_id") in published_homework_ids
+        }
+        possible = sum(
+            len(class_map.get(hw.get("class_id"), {}).get("student_ids", set()))
+            for hw in subject_homeworks
+            if hw.get("status") == "published"
+        )
+
+        subject_stats.append({
+            "subject": subject,
+            "class_count": len(subject_class_ids),
+            "student_count": len(subject_students),
+            "homework_count": len(subject_homeworks),
+            "published_homework_count": len(published_homework_ids),
+            "submission_count": len(subject_attempts),
+            "submitted_student_count": len({row.get("student_id") for row in subject_latest if row.get("student_id")}),
+            "average_score": _average(_score_values(subject_latest, "score")),
+            "average_percentage": _average(_score_values(subject_latest, "percentage")),
+            "coverage_percent": _percent(len(submitted_pairs), possible),
+            "last_submission_at": _latest_at(subject_attempts),
+        })
+
+    homework_stats = []
+    for homework_id, homework in homework_map.items():
+        homework_latest = [row for row in latest_rows if row.get("homework_id") == homework_id]
+        homework_attempts = [row for row in submission_rows if row.get("homework_id") == homework_id]
+        class_data = class_map.get(homework.get("class_id"), {})
+        student_count = len(class_data.get("student_ids", set()))
+        submitted_students = {row.get("student_id") for row in homework_latest if row.get("student_id")}
+
+        homework_stats.append({
+            **homework,
+            "class_name": class_data.get("name") or "Noma'lum sinf",
+            "student_count": student_count,
+            "submission_count": len(homework_attempts),
+            "submitted_student_count": len(submitted_students),
+            "average_score": _average(_score_values(homework_latest, "score")),
+            "average_percentage": _average(_score_values(homework_latest, "percentage")),
+            "coverage_percent": _percent(len(submitted_students), student_count),
+            "last_submission_at": _latest_at(homework_attempts),
+        })
+
+    homework_stats.sort(key=lambda hw: _date_key(hw.get("created_at")), reverse=True)
+
+    student_stats = []
+    for student_id in student_ids:
+        enrolled_class_ids = student_classes.get(student_id, set())
+        student_latest = [row for row in latest_rows if row.get("student_id") == student_id]
+        student_attempts = [row for row in submission_rows if row.get("student_id") == student_id]
+        assigned_homework_count = len([
+            homework for homework in homework_map.values()
+            if homework.get("status") == "published" and homework.get("class_id") in enrolled_class_ids
+        ])
+        submitted_homework_ids = {row.get("homework_id") for row in student_latest if row.get("homework_id")}
+        student_data = student_map.get(student_id, {})
+
+        student_stats.append({
+            "id": student_id,
+            "full_name": student_data.get("full_name") or "Noma'lum o'quvchi",
+            "telegram_username": student_data.get("telegram_username"),
+            "class_ids": sorted(enrolled_class_ids),
+            "classes": [
+                {
+                    "id": class_id,
+                    "name": class_map[class_id]["name"],
+                    "subject": class_map[class_id]["subject"],
+                }
+                for class_id in sorted(enrolled_class_ids)
+                if class_id in class_map
+            ],
+            "assigned_homework_count": assigned_homework_count,
+            "submitted_homework_count": len(submitted_homework_ids),
+            "submission_count": len(student_attempts),
+            "average_score": _average(_score_values(student_latest, "score")),
+            "average_percentage": _average(_score_values(student_latest, "percentage")),
+            "coverage_percent": _percent(len(submitted_homework_ids), assigned_homework_count),
+            "last_submission_at": _latest_at(student_attempts),
+        })
+
+    student_stats.sort(key=lambda student: (_date_key(student.get("last_submission_at")), student.get("full_name") or ""), reverse=True)
+
+    return {
+        "generated_at": datetime.utcnow(),
+        "summary": {
+            "class_count": len(class_map),
+            "subject_count": len(subject_names),
+            "student_count": len(student_ids),
+            "homework_count": len(homework_map),
+            "published_homework_count": len([hw for hw in homework_map.values() if hw.get("status") == "published"]),
+            "submission_count": len(submission_rows),
+            "submitted_student_count": len({row.get("student_id") for row in latest_rows if row.get("student_id")}),
+            "average_score": _average(_score_values(latest_rows, "score")),
+            "average_percentage": _average(_score_values(latest_rows, "percentage")),
+            "coverage_percent": _percent(len(published_latest_rows), total_possible_submissions),
+        },
+        "classes": class_stats,
+        "subjects": subject_stats,
+        "homeworks": homework_stats,
+        "students": student_stats,
+        "submissions": submission_rows,
+    }
 
 @router.post("/homeworks/{homework_id}/analyze-source")
 async def analyze_homework_source(
