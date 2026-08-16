@@ -20,7 +20,7 @@ from app.bot.handlers import BOT_HANDLER_VERSION, router as bot_router
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 logging.basicConfig(level=logging.INFO)
 
-APP_VERSION = "bot-start-url-fix-b41a5d4"
+APP_VERSION = "teacher-dashboard-fc128f7"
 bot = None
 dp = Dispatcher()
 
