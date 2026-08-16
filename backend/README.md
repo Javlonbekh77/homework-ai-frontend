@@ -22,3 +22,6 @@ ENABLE_BOT_POLLING=true
 ```
 
 For API-only deploys, set `ENABLE_BOT_POLLING=false`.
+
+`TELEGRAM_WEB_APP_URL` must be the public Vercel frontend URL. The bot also accepts
+`WEB_APP_URL`, `FRONTEND_URL`, `VERCEL_PROJECT_PRODUCTION_URL`, or `VERCEL_URL`.
