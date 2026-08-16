@@ -37,15 +37,25 @@ async def lifespan(app: FastAPI):
     global bot
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if token and env_flag("ENABLE_BOT_POLLING", True):
-        bot = Bot(token=token)
-        dp.include_router(bot_router)
-        asyncio.create_task(dp.start_polling(bot))
+        try:
+            bot = Bot(token=token)
+            dp.include_router(bot_router)
+            asyncio.create_task(start_bot_polling(bot))
+        except Exception:
+            logging.exception("Telegram bot polling could not be started.")
     yield
     # Shutdown
     if bot:
         await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
+
+
+async def start_bot_polling(active_bot: Bot) -> None:
+    try:
+        await dp.start_polling(active_bot)
+    except Exception:
+        logging.exception("Telegram bot polling stopped with an error.")
 
 app.add_middleware(
     CORSMiddleware,
