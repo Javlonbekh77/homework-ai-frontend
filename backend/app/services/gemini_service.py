@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import json
 import logging
 import mimetypes
@@ -8,6 +7,7 @@ from pathlib import Path
 from typing import Type, TypeVar
 
 from google import genai
+from google.genai import types
 from pydantic import BaseModel, ValidationError
 
 from .prompts import (
@@ -18,17 +18,8 @@ from .prompts import (
 )
 from .schemas import BookExtractionResult, HomeworkEvaluationResult
 
-DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_TIMEOUT_SECONDS = 60
-LEGACY_MODELS = {
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-001",
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash-lite-001",
-    "gemini-2.5-flash",
-}
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -84,44 +75,49 @@ async def _call_gemini_json(
 ) -> SchemaT:
     client = get_client()
     timeout_seconds = _get_timeout_seconds()
-    model_name = _get_model_name()
+    image_part = _image_input(image_path)
+    last_error: Exception | None = None
 
-    async def _request():
-        return await client.aio.models.generate_content(
-            model=model_name,
-            contents=[
-                user_task,
-                _image_input(image_path)
-            ],
-            config={
-                "system_instruction": system_instruction,
-                "response_mime_type": "application/json",
-                "response_schema": schema.model_json_schema(),
-                "temperature": 0.1,
-                "thinking_config": {"thinking_budget": 0}
-            }
-        )
+    attempts = (
+        ("pydantic_schema", _build_config(system_instruction, schema=schema)),
+        ("json_schema", _build_config(system_instruction, response_json_schema=schema.model_json_schema())),
+        ("json_only", _build_config(system_instruction)),
+    )
 
     try:
-        interaction = await asyncio.wait_for(_request(), timeout=timeout_seconds + 5)
+        for model_name in _get_model_names():
+            for attempt_name, config in attempts:
+                request_task = _with_schema_instruction(user_task, schema) if attempt_name == "json_only" else user_task
+                try:
+                    logging.info("Gemini request using model=%s attempt=%s", model_name, attempt_name)
+                    interaction = await asyncio.wait_for(
+                        client.aio.models.generate_content(
+                            model=model_name,
+                            contents=[image_part, request_task],
+                            config=config,
+                        ),
+                        timeout=timeout_seconds + 5,
+                    )
+                    logging.info("Gemini request completed")
+                    return _parse_structured_response(_extract_text(interaction), schema)
+                except asyncio.TimeoutError as exc:
+                    raise GeminiAnalysisError("Gemini request timed out") from exc
+                except GeminiAnalysisError:
+                    raise
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning(
+                        "Gemini generation attempt failed model=%s attempt=%s error=%s",
+                        model_name,
+                        attempt_name,
+                        exc,
+                    )
     except asyncio.TimeoutError as exc:
         raise GeminiAnalysisError("Gemini request timed out") from exc
-    except Exception as exc:
-        logging.error(f"Gemini generation error: {exc}")
-        raise GeminiAnalysisError(f"Gemini API error: {exc}") from exc
     finally:
         client.close()
 
-    logging.info("Gemini request completed")
-    
-    output_text = ""
-    try:
-        output_text = interaction.text
-    except Exception:
-        if hasattr(interaction, "candidates") and interaction.candidates:
-            output_text = interaction.candidates[0].content.parts[0].text
-            
-    return _parse_structured_response(output_text, schema)
+    raise GeminiAnalysisError(f"Gemini API error: {last_error}") from last_error
 
 
 def _get_timeout_seconds() -> int:
@@ -135,29 +131,52 @@ def _get_timeout_seconds() -> int:
         return DEFAULT_TIMEOUT_SECONDS
 
 
-def _get_model_name() -> str:
-    raw_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
-    if not raw_model:
-        return DEFAULT_MODEL
+def _get_model_names() -> list[str]:
+    raw_model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip()
+    configured_model = raw_model.removeprefix("models/") if raw_model else DEFAULT_MODEL
 
-    normalized_model = raw_model.removeprefix("models/")
-    if normalized_model in LEGACY_MODELS:
-        logging.warning("Configured Gemini model %s is legacy; using %s", raw_model, DEFAULT_MODEL)
-        return DEFAULT_MODEL
-
-    return normalized_model
+    model_names = [configured_model]
+    if configured_model != DEFAULT_MODEL:
+        model_names.append(DEFAULT_MODEL)
+    return model_names
 
 
-def _image_input(image_path: str) -> dict:
+def _build_config(
+    system_instruction: str,
+    *,
+    schema: Type[SchemaT] | None = None,
+    response_json_schema: dict | None = None,
+) -> types.GenerateContentConfig:
+    return types.GenerateContentConfig(
+        system_instruction=system_instruction,
+        response_mime_type="application/json",
+        response_schema=schema,
+        response_json_schema=response_json_schema,
+        temperature=0.1,
+    )
+
+
+def _image_input(image_path: str) -> types.Part:
     path = Path(image_path)
     mime_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-    image_b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
-    return {
-        "inline_data": {
-            "mime_type": mime_type,
-            "data": image_b64
-        }
-    }
+    return types.Part.from_bytes(data=path.read_bytes(), mime_type=mime_type)
+
+
+def _with_schema_instruction(user_task: str, schema: Type[SchemaT]) -> str:
+    return (
+        f"{user_task}\n\n"
+        "Return ONLY valid JSON matching this JSON Schema. Do not wrap it in markdown.\n"
+        f"{json.dumps(schema.model_json_schema(), ensure_ascii=False)}"
+    )
+
+
+def _extract_text(interaction) -> str:
+    try:
+        return interaction.text
+    except Exception:
+        if hasattr(interaction, "candidates") and interaction.candidates:
+            return interaction.candidates[0].content.parts[0].text
+    return ""
 
 
 def _parse_structured_response(raw_text: str, schema: Type[SchemaT]) -> SchemaT:

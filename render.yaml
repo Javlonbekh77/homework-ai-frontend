@@ -11,7 +11,7 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-2.5-flash
       - key: GEMINI_TIMEOUT_SECONDS
         value: "60"
       - key: ENABLE_BOT_POLLING
