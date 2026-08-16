@@ -77,6 +77,48 @@ async def join_class(req: JoinClassRequest, current_user: dict = Depends(get_cur
     db.collection("class_members").document().set(membership)
     return {"status": "success", "class_id": class_id}
 
+@router.get("/search")
+async def search_class(join_code: str, current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "student":
+        raise HTTPException(status_code=403, detail="Only students can search classes")
+
+    db = get_db()
+    code = join_code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Join code is required")
+
+    classes = list(db.collection("classes").where("join_code", "==", code).stream())
+    if not classes:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    class_doc = classes[0]
+    class_data = class_doc.to_dict()
+    members = list(db.collection("class_members").where("class_id", "==", class_doc.id).stream())
+    active_members = [
+        member for member in members
+        if member.to_dict().get("status", "active") == "active"
+    ]
+    already_joined = any(
+        member.to_dict().get("student_id") == current_user["id"]
+        for member in active_members
+    )
+    teacher_name = None
+    teacher_id = class_data.get("teacher_id")
+    if teacher_id:
+        teacher_doc = db.collection("users").document(teacher_id).get()
+        if teacher_doc.exists:
+            teacher_name = teacher_doc.to_dict().get("full_name")
+
+    return {
+        "id": class_doc.id,
+        "name": class_data.get("name"),
+        "subject": class_data.get("subject"),
+        "join_code": class_data.get("join_code"),
+        "teacher_name": teacher_name,
+        "student_count": len(active_members),
+        "already_joined": already_joined,
+    }
+
 @router.get("/{class_id}/students")
 async def get_class_students(class_id: str, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "teacher":
@@ -104,10 +146,13 @@ async def get_class_students(class_id: str, current_user: dict = Depends(get_cur
             hw_scores = {}
             for sub in sub_list:
                 hw_id = sub.get("homework_id")
-                # Keep the max score or latest score for this homework
-                score = sub.get("score", 0)
-                if hw_id not in hw_scores or score > hw_scores[hw_id]:
-                    hw_scores[hw_id] = score
+                percentage = sub.get("percentage")
+                if percentage is None:
+                    max_score = sub.get("max_score") or 10
+                    raw_score = sub.get("score") or 0
+                    percentage = (raw_score / max_score) * 100 if max_score else 0
+                if hw_id not in hw_scores or percentage > hw_scores[hw_id]:
+                    hw_scores[hw_id] = percentage
             
             avg_score = sum(hw_scores.values()) / len(hw_scores) if hw_scores else 0.0
             

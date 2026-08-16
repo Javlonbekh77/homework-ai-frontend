@@ -18,10 +18,12 @@ import {
   Plus,
   RefreshCcw,
   School,
+  Search,
   Send,
   Star,
   Trophy,
   Upload,
+  UserPlus,
   UserRound,
   UsersRound,
 } from "lucide-react";
@@ -39,6 +41,7 @@ import {
   getStudentHomeworks,
   joinClass,
   publishHomework,
+  searchClassByCode,
   submitHomework,
   updateRole,
   getClassStudents,
@@ -69,6 +72,11 @@ type SchoolClass = {
   subject: string;
   join_code?: string;
   student_count?: number;
+};
+
+type ClassSearchResult = SchoolClass & {
+  teacher_name?: string | null;
+  already_joined?: boolean;
 };
 
 type AnswerProblem = {
@@ -118,6 +126,11 @@ type EvaluationProblem = {
 
 type Submission = {
   id: string;
+  homework_title?: string;
+  class_name?: string;
+  subject?: string;
+  student_name?: string;
+  telegram_username?: string | null;
   attempt_number?: number;
   score?: number;
   max_score?: number;
@@ -295,6 +308,19 @@ function shortDate(value?: string | null) {
   return date.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short" });
 }
 
+function submissionRank(submission: Submission) {
+  const date = new Date(submission.submitted_at);
+  const time = Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  return time + (submission.attempt_number ?? 0);
+}
+
+function latestSubmission<T extends Submission>(items: T[]) {
+  return items.reduce<T | null>((latest, item) => {
+    if (!latest) return item;
+    return submissionRank(item) > submissionRank(latest) ? item : latest;
+  }, null);
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
@@ -314,6 +340,7 @@ export default function App() {
     subject: "Matematika",
   });
   const [joinCode, setJoinCode] = useState("");
+  const [classSearchResult, setClassSearchResult] = useState<ClassSearchResult | null>(null);
   const [activeHomeworkId, setActiveHomeworkId] = useState("");
   const [problemRange, setProblemRange] = useState("1-misoldan 5-misolgacha");
   const [sourceFile, setSourceFile] = useState<File | null>(null);
@@ -356,7 +383,7 @@ export default function App() {
       setDashboardClassId((current) => (
         current && analytics.classes.some((item) => item.id === current)
           ? current
-          : analytics.classes[0]?.id || ""
+          : ""
       ));
       setDashboardSubject((current) => (
         current && analytics.subjects.some((item) => item.subject === current) ? current : ""
@@ -457,8 +484,9 @@ export default function App() {
       void loadStudents();
       // Load class homeworks as well to keep them in sync
       void loadTeacherHomeworks(user.id, selectedTeacherClassId);
+      void loadTeacherAnalytics(user.id);
     }
-  }, [user?.role, user?.id, selectedTeacherClassId, loadTeacherHomeworks]);
+  }, [user?.role, user?.id, selectedTeacherClassId, loadTeacherHomeworks, loadTeacherAnalytics]);
 
   async function chooseRole(role: Role) {
     if (!user) return;
@@ -499,15 +527,35 @@ export default function App() {
     }
   }
 
-  async function handleJoinClass(event: FormEvent) {
+  async function handleSearchClass(event: FormEvent) {
     event.preventDefault();
     if (!user || !joinCode.trim()) return;
+    setBusyAction("search-class");
+    setError("");
+    setNotice("");
+    setClassSearchResult(null);
+    try {
+      const found = (await searchClassByCode(user.id, joinCode)) as ClassSearchResult;
+      setClassSearchResult(found);
+      setNotice(found.already_joined ? "Siz bu sinfga allaqachon qo'shilgansiz." : "Sinf topildi.");
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleJoinClass(event?: FormEvent, codeOverride?: string) {
+    event?.preventDefault();
+    const code = (codeOverride || joinCode).trim().toUpperCase();
+    if (!user || !code) return;
     setBusyAction("join-class");
     setError("");
     setNotice("");
     try {
-      await joinClass(user.id, joinCode);
+      await joinClass(user.id, code);
       setJoinCode("");
+      setClassSearchResult(null);
       setNotice("Sinfga qo'shildingiz.");
       await loadDashboard(user);
     } catch (caught) {
@@ -1002,40 +1050,7 @@ export default function App() {
             )}
 
             {classSubTab === "grades" && (
-              <div className="card" style={{ padding: "1rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 12px" }}>Baholar Jurnali</h3>
-                {classStudents.length === 0 ? (
-                  <div className="empty-state compact">Sinfda hali o'quvchilar yo'q.</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {classStudents.map((student) => (
-                      <div key={student.id} style={{ padding: "12px", background: "var(--background)", borderRadius: "12px", border: "1px solid var(--border)" }}>
-                        <div className="flex-between" style={{ marginBottom: "8px" }}>
-                          <strong style={{ fontSize: "0.9rem" }}>{student.full_name}</strong>
-                          <span style={{ fontWeight: 800, color: "var(--secondary)" }}>{student.average_score}%</span>
-                        </div>
-                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                          {classHws.map(h => (
-                            <span 
-                              key={h.id} 
-                              style={{ 
-                                fontSize: "0.7rem", 
-                                padding: "4px 8px", 
-                                borderRadius: "6px", 
-                                background: "var(--surface)", 
-                                border: "1px solid var(--border)" 
-                              }}
-                              title={h.title}
-                            >
-                              {h.title.slice(0, 8)}...
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              renderClassGradeJournal(selectedTeacherClassId, classHws)
             )}
           </div>
         );
@@ -1272,6 +1287,150 @@ export default function App() {
     );
   }
 
+  function renderClassGradeJournal(classId: string, fallbackHomeworks: Homework[]) {
+    const dashboardHomeworks = teacherDashboard?.homeworks.filter((homework) => homework.class_id === classId) || [];
+    const dashboardStudents = teacherDashboard?.students.filter((student) => student.class_ids.includes(classId)) || [];
+    const dashboardSubmissions = teacherDashboard?.submissions.filter((submission) => submission.class_id === classId) || [];
+    const gradeHomeworks = dashboardHomeworks.length
+      ? dashboardHomeworks
+      : fallbackHomeworks.map((homework) => ({
+        id: homework.id,
+        title: homework.title,
+        status: homework.status,
+        student_count: classStudents.length,
+        submitted_student_count: 0,
+        average_percentage: 0,
+      }));
+    const gradeStudents = dashboardStudents.length
+      ? dashboardStudents
+      : classStudents.map((student) => ({
+        id: student.id,
+        full_name: student.full_name,
+        telegram_username: student.telegram_username,
+        assigned_homework_count: gradeHomeworks.filter((homework) => homework.status === "published").length,
+        submitted_homework_count: student.submission_count || 0,
+        average_percentage: student.average_score || 0,
+        last_submission_at: null,
+      }));
+    const publishedCount = gradeHomeworks.filter((homework) => homework.status === "published").length;
+    const submittedCount = dashboardSubmissions.length;
+    const classAverage = gradeStudents.length
+      ? gradeStudents.reduce((sum, student) => sum + (student.average_percentage || 0), 0) / gradeStudents.length
+      : 0;
+
+    if (classStudentsLoading || dashboardLoading) {
+      return (
+        <section className="grade-journal-panel">
+          <div className="dashboard-loading" style={{ margin: 0 }}>
+            <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} />
+            <span>Baholar yangilanmoqda...</span>
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <section className="grade-journal-panel">
+        <div className="dashboard-section-title">
+          <div>
+            <h4>Baholar jurnali</h4>
+            <p>Har bir o'quvchi bo'yicha topshirilgan ishlar va AI natijalari</p>
+          </div>
+          <button
+            className="text-btn"
+            type="button"
+            disabled={!user || dashboardLoading}
+            onClick={() => user && void loadTeacherAnalytics(user.id)}
+          >
+            Yangilash
+          </button>
+        </div>
+
+        <div className="grade-summary-grid">
+          <div>
+            <strong>{gradeStudents.length}</strong>
+            <span>O'quvchi</span>
+          </div>
+          <div>
+            <strong>{publishedCount}/{gradeHomeworks.length}</strong>
+            <span>Vazifa</span>
+          </div>
+          <div>
+            <strong>{submittedCount}</strong>
+            <span>Submission</span>
+          </div>
+          <div>
+            <strong>{metricPercent(classAverage)}</strong>
+            <span>O'rtacha</span>
+          </div>
+        </div>
+
+        {!gradeHomeworks.length ? (
+          <div className="empty-state compact">Bu sinfda hali vazifa yaratilmagan.</div>
+        ) : null}
+
+        {!gradeStudents.length ? (
+          <div className="empty-state compact">Sinfda hali o'quvchilar yo'q.</div>
+        ) : null}
+
+        {gradeStudents.length > 0 && gradeHomeworks.length > 0 ? (
+          <div className="grade-student-list">
+            {gradeStudents.map((student) => {
+              const studentSubmissions = dashboardSubmissions.filter((submission) => submission.student_id === student.id);
+              const lastSubmission = latestSubmission(studentSubmissions);
+              return (
+                <article className="grade-student-card" key={student.id}>
+                  <div className="grade-student-head">
+                    <div className="flex-start" style={{ minWidth: 0 }}>
+                      <span className="student-avatar">{initials(student.full_name) || "?"}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <strong>{student.full_name}</strong>
+                        <span>
+                          {student.telegram_username ? `@${student.telegram_username}` : "Username yo'q"} - {student.submitted_homework_count}/{student.assigned_homework_count}
+                        </span>
+                      </div>
+                    </div>
+                    <b>{metricPercent(student.average_percentage)}</b>
+                  </div>
+
+                  <div className="grade-chip-grid">
+                    {gradeHomeworks.map((homework) => {
+                      const submission = latestSubmission(
+                        studentSubmissions.filter((item) => item.homework_id === homework.id),
+                      );
+                      return (
+                        <span
+                          className={`grade-chip ${submission ? "done" : "pending"}`}
+                          key={`${student.id}-${homework.id}`}
+                          title={homework.title}
+                        >
+                          <small>{homework.title}</small>
+                          <strong>{submission ? scoreText(submission) : "Kutilmoqda"}</strong>
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                  {lastSubmission?.grading_result?.general_feedback ? (
+                    <p className="grade-feedback">
+                      {lastSubmission.grading_result.general_feedback.length > 180
+                        ? `${lastSubmission.grading_result.general_feedback.slice(0, 180)}...`
+                        : lastSubmission.grading_result.general_feedback}
+                    </p>
+                  ) : (
+                    <p className="grade-feedback muted">
+                      O'quvchi topshiriq yuborgandan keyin AI feedback shu yerda ko'rinadi.
+                    </p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   function renderTeacherAnalyticsDashboard() {
     if (dashboardLoading && !teacherDashboard) {
       return (
@@ -1303,6 +1462,12 @@ export default function App() {
       (!dashboardSubject || submission.subject === dashboardSubject) &&
       (!dashboardStudentId || submission.student_id === dashboardStudentId)
     ));
+    const classBars = [...dashboard.classes]
+      .sort((a, b) => b.coverage_percent - a.coverage_percent)
+      .slice(0, 5);
+    const subjectBars = [...dashboard.subjects]
+      .sort((a, b) => b.submission_count - a.submission_count)
+      .slice(0, 5);
     const visibleSubmissions = selectedDashStudent ? filteredSubmissions : filteredSubmissions.slice(0, 6);
     const detailTitle = selectedDashStudent
       ? selectedDashStudent.full_name
@@ -1353,6 +1518,44 @@ export default function App() {
           <span>{summary.published_homework_count}/{summary.homework_count} vazifa nashrda</span>
           <span>{summary.submitted_student_count} o'quvchi topshirgan</span>
           <span>{metricPercent(summary.coverage_percent)} faollik</span>
+        </div>
+
+        <div className="dashboard-insight-grid">
+          <section className="dashboard-chart-card">
+            <div className="dashboard-section-title">
+              <h4>Sinf faolligi</h4>
+              <span>Qamrov</span>
+            </div>
+            {classBars.length ? classBars.map((item) => (
+              <div className="analytics-bar-row" key={item.id}>
+                <span>{item.name}</span>
+                <div className="analytics-bar-track">
+                  <i style={{ width: metricPercent(item.coverage_percent) }} />
+                </div>
+                <b>{metricPercent(item.coverage_percent)}</b>
+              </div>
+            )) : (
+              <div className="empty-state compact">Hali sinf statistikasi yo'q.</div>
+            )}
+          </section>
+
+          <section className="dashboard-chart-card">
+            <div className="dashboard-section-title">
+              <h4>Fanlar bo'yicha</h4>
+              <span>Submission</span>
+            </div>
+            {subjectBars.length ? subjectBars.map((item) => (
+              <div className="analytics-bar-row" key={item.subject}>
+                <span>{item.subject}</span>
+                <div className="analytics-bar-track">
+                  <i style={{ width: metricPercent(item.coverage_percent) }} />
+                </div>
+                <b>{item.submission_count}</b>
+              </div>
+            )) : (
+              <div className="empty-state compact">Hali fan statistikasi yo'q.</div>
+            )}
+          </section>
         </div>
 
         <div className="dashboard-block">
@@ -1704,6 +1907,8 @@ export default function App() {
           <div className="section-title">
             <h2>Barcha vazifalar</h2>
           </div>
+
+          {!classes.length ? renderJoinClassPanel("Avval sinfga qo'shiling") : null}
           
           <h3 className="text-sm text-muted mb-2">Faol vazifalar ({pendingHws.length})</h3>
           <section className="stack mb-3">
@@ -1797,26 +2002,66 @@ export default function App() {
           + Vazifa topshirish
         </button>
 
-        {!classes.length && (
-          <form className="panel" onSubmit={handleJoinClass} style={{ marginTop: "1.5rem" }}>
-            <div className="panel-title">
-              <School size={20} />
-              <h2>Sinfga qo'shilish</h2>
-            </div>
-            <label className="input-group">
-              <input
-                className="input-field code-input"
-                value={joinCode}
-                onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
-                placeholder="Kod: ABC123"
-              />
-            </label>
-            <button className="btn btn-primary" type="submit" disabled={isBusy || !joinCode.trim()}>
-              <Plus size={18} /> Qo'shilish
-            </button>
-          </form>
-        )}
+        {renderJoinClassPanel(classes.length ? "Yana sinfga qo'shilish" : "Sinfga qo'shilish")}
       </div>
+    );
+  }
+
+  function renderJoinClassPanel(title = "Sinfga qo'shilish") {
+    const isSearching = busyAction === "search-class";
+    const isJoining = busyAction === "join-class";
+
+    return (
+      <section className="panel join-search-panel" style={{ marginTop: "1.5rem" }}>
+        <div className="panel-title">
+          <School size={20} />
+          <h2>{title}</h2>
+        </div>
+        <form onSubmit={handleSearchClass}>
+          <label className="input-group">
+            <span className="input-label">O'qituvchi bergan sinf kodi</span>
+            <input
+              className="input-field code-input"
+              value={joinCode}
+              onChange={(event) => {
+                setJoinCode(event.target.value.toUpperCase());
+                setClassSearchResult(null);
+              }}
+              placeholder="Kod: ABC123"
+            />
+          </label>
+          <button className="btn btn-outline" type="submit" disabled={isBusy || !joinCode.trim()}>
+            {isSearching ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Search size={18} />}
+            Sinfni qidirish
+          </button>
+        </form>
+
+        {classSearchResult ? (
+          <div className="class-search-result">
+            <div className="flex-start" style={{ minWidth: 0 }}>
+              <div className="student-avatar">
+                <School size={17} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <strong>{classSearchResult.name}</strong>
+                <span>
+                  {classSearchResult.subject} - {classSearchResult.teacher_name || "O'qituvchi"}
+                </span>
+                <small>{classSearchResult.student_count ?? 0} o'quvchi</small>
+              </div>
+            </div>
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={isBusy || classSearchResult.already_joined}
+              onClick={() => void handleJoinClass(undefined, classSearchResult.join_code || joinCode)}
+            >
+              {isJoining ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <UserPlus size={17} />}
+              {classSearchResult.already_joined ? "Qo'shilgansiz" : "Qo'shilish"}
+            </button>
+          </div>
+        ) : null}
+      </section>
     );
   }
 
@@ -1941,11 +2186,18 @@ export default function App() {
               <div className="flex-between" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "10px", marginBottom: "12px" }}>
                 <div>
                   <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700 }}>
-                    Urinish {submission.attempt_number ?? 1}
+                    {submission.student_name || `Urinish ${submission.attempt_number ?? 1}`}
                   </h4>
                   <span className="text-xs text-muted">
+                    {submission.student_name ? `Urinish ${submission.attempt_number ?? 1} - ` : ""}
+                    {submission.homework_title ? `${submission.homework_title} - ` : ""}
                     {new Date(submission.submitted_at).toLocaleString("uz-UZ")}
                   </span>
+                  {submission.class_name || submission.subject ? (
+                    <span className="text-xs text-muted" style={{ display: "block" }}>
+                      {[submission.class_name, submission.subject].filter(Boolean).join(" - ")}
+                    </span>
+                  ) : null}
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--primary)" }}>

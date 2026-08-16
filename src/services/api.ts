@@ -71,6 +71,15 @@ export async function joinClass(userId: string, joinCode: string) {
   return res.json();
 }
 
+export async function searchClassByCode(userId: string, joinCode: string) {
+  const params = new URLSearchParams({ join_code: joinCode.trim().toUpperCase() });
+  const res = await fetch(`${BASE_URL}/classes/search?${params.toString()}`, {
+    headers: { "x-user-id": userId }
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Sinf topilmadi"));
+  return res.json();
+}
+
 // ----------------- HOMEWORKS -----------------
 
 export async function createHomework(userId: string, classId: string, title: string, description: string, subject: string) {

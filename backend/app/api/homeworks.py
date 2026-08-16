@@ -491,9 +491,35 @@ async def get_homework_submissions(homework_id: str, current_user: dict = Depend
     hw = db.collection("homeworks").document(homework_id).get()
     if not hw.exists or hw.to_dict().get("teacher_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-        
+
+    hw_dict = hw.to_dict()
+    class_id = hw_dict.get("class_id")
+    class_dict = {}
+    if class_id:
+        class_doc = db.collection("classes").document(class_id).get()
+        class_dict = class_doc.to_dict() if class_doc.exists else {}
     subs = db.collection("submissions").where("homework_id", "==", homework_id).stream()
-    return [{"id": s.id, **s.to_dict()} for s in subs]
+    result = []
+    for sub in subs:
+        sub_dict = sub.to_dict()
+        student_id = sub_dict.get("student_id")
+        student_doc = db.collection("users").document(student_id).get() if student_id else None
+        student_dict = student_doc.to_dict() if student_doc and student_doc.exists else {}
+        result.append({
+            "id": sub.id,
+            **sub_dict,
+            "homework_title": hw_dict.get("title"),
+            "class_name": class_dict.get("name") or "Noma'lum sinf",
+            "subject": hw_dict.get("subject") or class_dict.get("subject"),
+            "student_name": student_dict.get("full_name") or "Noma'lum o'quvchi",
+            "telegram_username": student_dict.get("telegram_username"),
+        })
+
+    return sorted(
+        result,
+        key=lambda item: (_date_key(item.get("submitted_at")), _as_float(item.get("attempt_number"))),
+        reverse=True,
+    )
 
 
 # ----------------- STUDENT ENDPOINTS -----------------
