@@ -321,6 +321,90 @@ function latestSubmission<T extends Submission>(items: T[]) {
   }, null);
 }
 
+function cleanInsightText(value?: string | null) {
+  return value?.replace(/\s+/g, " ").trim() || "";
+}
+
+function problemStatusLabel(status?: string) {
+  if (status === "incorrect") return "Xato yechim";
+  if (status === "missing") return "Tashlab ketilgan masala";
+  if (status === "uncertain") return "Noaniq javob";
+  return "AI aniqlagan xato";
+}
+
+function buildProgressInsights(items: Homework[], submissionsByHomework: Record<string, Submission[]>) {
+  const mistakeMap = new Map<string, {
+    label: string;
+    suggestion?: string;
+    count: number;
+    homeworks: Set<string>;
+    problems: Set<string>;
+  }>();
+  const feedbacks: { id: string; homeworkTitle: string; text: string; score: string }[] = [];
+
+  items.forEach((homework) => {
+    const cached = submissionsByHomework[homework.id] || [];
+    const submissions = cached.length ? cached : homework.latest_submission ? [homework.latest_submission] : [];
+    const submission = latestSubmission(submissions);
+    const result = submission?.grading_result;
+    if (!submission || !result) return;
+
+    const generalFeedback = cleanInsightText(result.general_feedback);
+    if (generalFeedback) {
+      feedbacks.push({
+        id: submission.id,
+        homeworkTitle: homework.title,
+        text: generalFeedback,
+        score: scoreText(submission),
+      });
+    }
+
+    (result.problems || []).forEach((problem) => {
+      const hasProblemIssue = problem.status && problem.status !== "correct";
+      const hasDetailedErrors = Boolean(problem.errors?.length);
+      if (!hasProblemIssue && !hasDetailedErrors) return;
+
+      const problemNumber = cleanInsightText(problem.problem_number) || "?";
+      const entries = hasDetailedErrors
+        ? problem.errors || []
+        : [{ description: cleanInsightText(problem.feedback) || problemStatusLabel(problem.status), suggestion: "" }];
+
+      entries.forEach((entry) => {
+        const label = cleanInsightText(entry.description) || problemStatusLabel(problem.status);
+        const suggestion = cleanInsightText(entry.suggestion);
+        const key = `${label.toLowerCase()}|${suggestion.toLowerCase()}`;
+        const current = mistakeMap.get(key) || {
+          label,
+          suggestion,
+          count: 0,
+          homeworks: new Set<string>(),
+          problems: new Set<string>(),
+        };
+        current.count += 1;
+        current.homeworks.add(homework.title);
+        current.problems.add(problemNumber);
+        mistakeMap.set(key, current);
+      });
+    });
+  });
+
+  const mistakes = [...mistakeMap.values()]
+    .map((item) => ({
+      label: item.label,
+      suggestion: item.suggestion,
+      count: item.count,
+      homeworks: [...item.homeworks],
+      problems: [...item.problems],
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 5);
+
+  return {
+    mistakes,
+    feedbacks: feedbacks.slice(0, 5),
+  };
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [classes, setClasses] = useState<SchoolClass[]>([]);
@@ -2319,6 +2403,7 @@ export default function App() {
     let totalScore = 0;
     completedHws.forEach(h => totalScore += (h.latest_score || 0));
     const averageScore = completedHws.length ? (totalScore / completedHws.length).toFixed(1) : "0";
+    const progressInsights = buildProgressInsights(homeworks, studentSubmissionsByHomework);
     
     return (
       <div className="animate-fade-in">
@@ -2349,7 +2434,40 @@ export default function App() {
         </div>
         <div className="card mt-3">
           <h3 className="mb-2">Eng ko'p qilingan xatolar</h3>
-          <div className="empty-state compact">Yetarlicha ma'lumot yo'q. Ko'proq vazifa bajaring!</div>
+          {progressInsights.mistakes.length ? (
+            <div className="progress-insight-list">
+              {progressInsights.mistakes.map((mistake) => (
+                <article className="progress-insight" key={`${mistake.label}-${mistake.count}`}>
+                  <div className="progress-insight-head">
+                    <strong>{mistake.label}</strong>
+                    <span>{mistake.count} marta</span>
+                  </div>
+                  {mistake.suggestion ? <p>{mistake.suggestion}</p> : null}
+                  <small>
+                    {mistake.homeworks.slice(0, 2).join(", ")}
+                    {mistake.problems.length ? ` - masalalar: ${mistake.problems.slice(0, 4).join(", ")}` : ""}
+                  </small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state compact">AI feedback yig'ilishi uchun kamida bitta tekshirilgan vazifa kerak.</div>
+          )}
+
+          {progressInsights.feedbacks.length ? (
+            <div className="progress-feedback-block">
+              <p className="eyebrow">So'nggi AI tavsiyalari</p>
+              {progressInsights.feedbacks.map((feedback) => (
+                <article className="progress-feedback" key={feedback.id}>
+                  <div className="flex-between">
+                    <strong>{feedback.homeworkTitle}</strong>
+                    <span>{feedback.score}</span>
+                  </div>
+                  <p>{feedback.text.length > 220 ? `${feedback.text.slice(0, 220)}...` : feedback.text}</p>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </div>
       </div>
     );
