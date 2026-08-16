@@ -1,5 +1,15 @@
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-const BASE_URL = (configuredBaseUrl || "http://localhost:8000/api").replace(/\/$/, "");
+const BASE_URL = normalizeApiBaseUrl(configuredBaseUrl || "http://localhost:8000/api");
+
+function normalizeApiBaseUrl(url: string) {
+  const cleanUrl = url.replace(/\/$/, "");
+  return cleanUrl.endsWith("/api") ? cleanUrl : `${cleanUrl}/api`;
+}
+
+async function parseError(res: Response, fallback: string) {
+  const data = await res.json().catch(() => null);
+  return data?.detail || fallback;
+}
 
 export async function authWithTelegram(initData: string) {
   const res = await fetch(`${BASE_URL}/auth/telegram`, {
@@ -7,7 +17,7 @@ export async function authWithTelegram(initData: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ init_data: initData }),
   });
-  if (!res.ok) throw new Error("Failed to auth");
+  if (!res.ok) throw new Error(await parseError(res, "Failed to auth"));
   return res.json();
 }
 
