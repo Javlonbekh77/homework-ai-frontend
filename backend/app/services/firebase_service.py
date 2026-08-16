@@ -26,7 +26,8 @@ def init_firebase():
                 firebase_admin.initialize_app(cred)
             else:
                 raise ValueError(
-                    "Firebase credentials not found. Set FIREBASE_SERVICE_ACCOUNT_JSON "
+                    "Firebase credentials not found. Set FIREBASE_SERVICE_ACCOUNT_BASE64 "
+                    "or FIREBASE_SERVICE_ACCOUNT_JSON "
                     f"or provide a credentials file at {cred_path}"
                 )
         db = firestore.client()
@@ -50,6 +51,15 @@ def is_firebase_ready():
 
 def get_firebase_error():
     return firebase_error
+
+
+def get_firebase_env_status():
+    return {
+        "has_firebase_service_account_base64": bool(os.getenv("FIREBASE_SERVICE_ACCOUNT_BASE64")),
+        "has_firebase_service_account_json": bool(os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")),
+        "has_firebase_credentials_path": bool(os.getenv("FIREBASE_CREDENTIALS_PATH")),
+        "has_google_application_credentials": bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")),
+    }
 
 
 def _get_service_account_json():

@@ -8,7 +8,12 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from contextlib import asynccontextmanager
 
-from app.services.firebase_service import get_firebase_error, init_firebase, is_firebase_ready
+from app.services.firebase_service import (
+    get_firebase_env_status,
+    get_firebase_error,
+    init_firebase,
+    is_firebase_ready,
+)
 from app.api import auth, classes, users, homeworks
 from app.bot.handlers import router as bot_router
 
@@ -77,6 +82,13 @@ async def health_check():
         "status": "ok",
         "firebase_ready": is_firebase_ready(),
         "firebase_error": get_firebase_error(),
+        "env": {
+            **get_firebase_env_status(),
+            "has_telegram_bot_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+            "has_telegram_web_app_url": bool(os.getenv("TELEGRAM_WEB_APP_URL")),
+            "has_gemini_api_key": bool(os.getenv("GEMINI_API_KEY")),
+            "enable_bot_polling": env_flag("ENABLE_BOT_POLLING", True),
+        },
     }
 
 
