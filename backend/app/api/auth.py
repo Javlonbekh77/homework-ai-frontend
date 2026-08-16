@@ -14,7 +14,8 @@ async def auth_telegram(req: TelegramAuthRequest):
             "id": 123456789,
             "username": "testuser",
             "first_name": "Ali",
-            "last_name": "Valiyev"
+            "last_name": "Valiyev",
+            "photo_url": "https://api.dicebear.com/7.x/adventurer/svg?seed=Ali"
         }
     else:
         try:
@@ -33,11 +34,23 @@ async def auth_telegram(req: TelegramAuthRequest):
         break
         
     if user_doc:
-        return {"status": "ok", "user": {"id": user_doc.id, **user_doc.to_dict()}}
+        user_data = user_doc.to_dict()
+        updates = {}
+        if tg_user.get("photo_url") and user_data.get("photo_url") != tg_user.get("photo_url"):
+            updates["photo_url"] = tg_user.get("photo_url")
+        if tg_user.get("username") and user_data.get("telegram_username") != tg_user.get("username"):
+            updates["telegram_username"] = tg_user.get("username")
+            
+        if updates:
+            db.collection("users").document(user_doc.id).update(updates)
+            user_data.update(updates)
+            
+        return {"status": "ok", "user": {"id": user_doc.id, **user_data}}
     else:
         new_user = {
             "telegram_id": tg_id,
             "telegram_username": tg_user.get("username"),
+            "photo_url": tg_user.get("photo_url"),
             "full_name": f"{tg_user.get('first_name', '')} {tg_user.get('last_name', '')}".strip(),
             "role": None,
             "created_at": datetime.utcnow()

@@ -187,3 +187,19 @@ export async function getMySubmissions(userId: string, homeworkId: string) {
   if (!res.ok) throw new Error("Failed to fetch my submissions");
   return res.json();
 }
+
+export async function getClassStudents(userId: string, classId: string) {
+  const res = await fetch(`${BASE_URL}/classes/${classId}/students`, {
+    headers: { "x-user-id": userId }
+  });
+  if (!res.ok) throw new Error("Failed to fetch class students");
+  return res.json();
+}
+
+export async function getTeacherHomeworks(userId: string) {
+  const res = await fetch(`${BASE_URL}/teacher/homeworks`, {
+    headers: { "x-user-id": userId }
+  });
+  if (!res.ok) throw new Error("Failed to fetch teacher homeworks");
+  return res.json();
+}

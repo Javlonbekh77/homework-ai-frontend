@@ -49,6 +49,15 @@ async def list_class_homeworks(class_id: str, current_user: dict = Depends(get_c
     hw_list = [{"id": h.id, **h.to_dict()} for h in hw_docs]
     return hw_list
 
+@router.get("/teacher/homeworks")
+async def list_teacher_homeworks(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can list homeworks")
+        
+    db = get_db()
+    hw_docs = db.collection("homeworks").where("teacher_id", "==", current_user["id"]).stream()
+    return [{"id": h.id, **h.to_dict()} for h in hw_docs]
+
 @router.post("/homeworks/{homework_id}/analyze-source")
 async def analyze_homework_source(
     homework_id: str, 
@@ -183,6 +192,21 @@ async def get_student_homeworks(current_user: dict = Depends(get_current_user)):
             # Omit answer keys
             hw_dict.pop("approved_answer_key", None)
             hw_dict.pop("ai_generated_answer_key", None)
+            
+            # Check for submission
+            subs = db.collection("submissions").where("homework_id", "==", hw.id).where("student_id", "==", current_user["id"]).stream()
+            sub_list = [s.to_dict() for s in subs]
+            if sub_list:
+                # Sort in memory by submitted_at to get latest
+                sub_list.sort(key=lambda x: str(x.get("submitted_at") or ""), reverse=True)
+                latest_sub = sub_list[0]
+                hw_dict["student_status"] = "submitted"
+                hw_dict["latest_score"] = latest_sub.get("score")
+                hw_dict["latest_percentage"] = latest_sub.get("percentage")
+                hw_dict["attempt_count"] = latest_sub.get("attempt_number", 1)
+            else:
+                hw_dict["student_status"] = "pending"
+                
             homeworks.append({"id": hw.id, **hw_dict})
             
     return homeworks

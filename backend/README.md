@@ -22,9 +22,3 @@ ENABLE_BOT_POLLING=true
 ```
 
 For API-only deploys, set `ENABLE_BOT_POLLING=false`.
-
-If Render has trouble with multiline JSON env values, base64-encode the Firebase service account file and set:
-
-```env
-FIREBASE_SERVICE_ACCOUNT_BASE64=base64_encoded_service_account_json
-```

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 
 class TelegramAuthRequest(BaseModel):
     init_data: str
@@ -14,9 +14,11 @@ class UserProfile(BaseModel):
 class UpdateRoleRequest(BaseModel):
     role: str
 
+SubjectType = Literal["Matematika", "Fizika", "Ona tili"]
+
 class ClassCreateRequest(BaseModel):
     name: str
-    subject: str
+    subject: SubjectType
 
 class ClassResponse(BaseModel):
     id: str
@@ -32,7 +34,7 @@ class JoinClassRequest(BaseModel):
 class HomeworkDraftRequest(BaseModel):
     title: str
     description: Optional[str] = None
-    subject: str
+    subject: SubjectType
 
 class HomeworkApproveKeyRequest(BaseModel):
     approved_answer_key: dict

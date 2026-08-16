@@ -27,3 +27,7 @@ serviceAccount*.json
 *.njsproj
 *.sln
 *.sw?
+
+# Scratch files
+prompt*
+error

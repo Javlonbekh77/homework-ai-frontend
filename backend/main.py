@@ -8,12 +8,7 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from contextlib import asynccontextmanager
 
-from app.services.firebase_service import (
-    get_firebase_env_status,
-    get_firebase_error,
-    init_firebase,
-    is_firebase_ready,
-)
+from app.services.firebase_service import init_firebase
 from app.api import auth, classes, users, homeworks
 from app.bot.handlers import router as bot_router
 
@@ -34,33 +29,20 @@ def env_flag(name: str, default: bool = False) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    try:
-        init_firebase()
-    except Exception:
-        logging.exception("Firebase initialization failed. API endpoints will fail until Firebase env is fixed.")
+    init_firebase()
     
     global bot
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if token and env_flag("ENABLE_BOT_POLLING", True):
-        try:
-            bot = Bot(token=token)
-            dp.include_router(bot_router)
-            asyncio.create_task(start_bot_polling(bot))
-        except Exception:
-            logging.exception("Telegram bot polling could not be started.")
+        bot = Bot(token=token)
+        dp.include_router(bot_router)
+        asyncio.create_task(dp.start_polling(bot))
     yield
     # Shutdown
     if bot:
         await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
-
-
-async def start_bot_polling(active_bot: Bot) -> None:
-    try:
-        await dp.start_polling(active_bot)
-    except Exception:
-        logging.exception("Telegram bot polling stopped with an error.")
 
 app.add_middleware(
     CORSMiddleware,
@@ -78,18 +60,7 @@ app.include_router(homeworks.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "ok",
-        "firebase_ready": is_firebase_ready(),
-        "firebase_error": get_firebase_error(),
-        "env": {
-            **get_firebase_env_status(),
-            "has_telegram_bot_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
-            "has_telegram_web_app_url": bool(os.getenv("TELEGRAM_WEB_APP_URL")),
-            "has_gemini_api_key": bool(os.getenv("GEMINI_API_KEY")),
-            "enable_bot_polling": env_flag("ENABLE_BOT_POLLING", True),
-        },
-    }
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
