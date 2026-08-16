@@ -1,0 +1,8 @@
+aiogram>=3.13.1
+fastapi>=0.115.0
+firebase-admin>=6.5.0
+google-genai>=2.18.1
+pydantic>=2.9.2
+python-dotenv>=1.0.1
+python-multipart>=0.0.9
+uvicorn[standard]>=0.30.0

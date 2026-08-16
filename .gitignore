@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+__pycache__/
+*.py[cod]
+*.log
+firebase-adminsdk*.json
+serviceAccount*.json
 
 # Editor directories and files
 .vscode/*
