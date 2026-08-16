@@ -98,6 +98,7 @@ type Homework = {
   latest_score?: number;
   latest_percentage?: number;
   attempt_count?: number;
+  latest_submission?: Submission;
   deadline?: string | null;
 };
 
@@ -205,7 +206,7 @@ export default function App() {
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [submitFileValue, setSubmitFileValue] = useState<File | null>(null);
   const [studentSubmissionHomeworkId, setStudentSubmissionHomeworkId] = useState("");
-  const [studentSubmissions, setStudentSubmissions] = useState<Submission[]>([]);
+  const [studentSubmissionsByHomework, setStudentSubmissionsByHomework] = useState<Record<string, Submission[]>>({});
   const [teacherSubmissionHomeworkId, setTeacherSubmissionHomeworkId] = useState("");
   const [teacherSubmissions, setTeacherSubmissions] = useState<Submission[]>([]);
   
@@ -252,6 +253,7 @@ export default function App() {
         } else {
           const list = (await getStudentHomeworks(nextUser.id)) as Homework[];
           setHomeworks(list);
+          seedLatestSubmissions(list);
         }
       } catch (caught) {
         setError(getErrorMessage(caught));
@@ -492,10 +494,14 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      await submitHomework(user.id, homeworkId, submitFileValue);
+      const submitted = (await submitHomework(user.id, homeworkId, submitFileValue)) as Submission;
+      setStudentSubmissionsByHomework((prev) => ({
+        ...prev,
+        [homeworkId]: [submitted, ...(prev[homeworkId] || [])],
+      }));
       const list = (await getMySubmissions(user.id, homeworkId)) as Submission[];
       setStudentSubmissionHomeworkId(homeworkId);
-      setStudentSubmissions(list);
+      setStudentSubmissionsByHomework((prev) => ({ ...prev, [homeworkId]: sortSubmissions(list) }));
       setSubmitFileValue(null);
       setNotice("Homework yuborildi va tekshirildi.");
       await loadDashboard(user);
@@ -513,12 +519,34 @@ export default function App() {
     try {
       const list = (await getMySubmissions(user.id, homeworkId)) as Submission[];
       setStudentSubmissionHomeworkId(homeworkId);
-      setStudentSubmissions(list);
+      setStudentSubmissionsByHomework((prev) => ({ ...prev, [homeworkId]: sortSubmissions(list) }));
     } catch (caught) {
       setError(getErrorMessage(caught));
     } finally {
       setBusyAction(null);
     }
+  }
+
+  function seedLatestSubmissions(items: Homework[]) {
+    const entries = items
+      .filter((homework) => homework.latest_submission)
+      .map((homework) => [homework.id, [homework.latest_submission as Submission] as Submission[]] as const);
+
+    if (!entries.length) return;
+
+    setStudentSubmissionsByHomework((prev) => {
+      const next = { ...prev };
+      entries.forEach(([homeworkId, submissions]) => {
+        if (!next[homeworkId]?.length) {
+          next[homeworkId] = submissions;
+        }
+      });
+      return next;
+    });
+  }
+
+  function sortSubmissions(items: Submission[]) {
+    return [...items].sort((a, b) => (b.attempt_number ?? 0) - (a.attempt_number ?? 0));
   }
 
   function handleSourceFile(event: ChangeEvent<HTMLInputElement>) {
@@ -1412,6 +1440,9 @@ export default function App() {
   function renderStudentHomework(homework: Homework) {
     const isActive = studentSubmissionHomeworkId === homework.id;
     const isCompleted = homework.student_status === "submitted";
+    const isSubmitting = busyAction === `submit-${homework.id}`;
+    const isLoadingSubmissions = busyAction === `my-submissions-${homework.id}`;
+    const submissions = studentSubmissionsByHomework[homework.id] || [];
 
     // Map subject to color/icon
     let iconColor = "var(--primary)";
@@ -1434,7 +1465,9 @@ export default function App() {
             setStudentSubmissionHomeworkId("");
           } else {
             setStudentSubmissionHomeworkId(homework.id);
-            void handleLoadMySubmissions(homework.id);
+            if (!studentSubmissionsByHomework[homework.id]?.length) {
+              void handleLoadMySubmissions(homework.id);
+            }
           }
         }}
       >
@@ -1461,28 +1494,52 @@ export default function App() {
               {homework.description || "Ushbu vazifa uchun qo'shimcha tavsif berilmagan."}
             </p>
 
-            <form className="inline-form" onSubmit={(event) => void handleSubmitHomework(event, homework.id)} style={{ background: "var(--background)", padding: "1rem", borderRadius: "12px", marginBottom: "1rem" }}>
+            <form className="inline-form" onSubmit={(event) => void handleSubmitHomework(event, homework.id)} style={{ background: "var(--background)", padding: "1rem", borderRadius: "12px", marginBottom: "1rem", position: "relative", overflow: "hidden" }}>
               <p className="eyebrow" style={{ marginBottom: "8px" }}>Vazifani topshirish (Rasm yuklash)</p>
               <label className="file-picker" style={{ border: "2px dashed var(--border)", background: "var(--surface)" }}>
                 <Upload size={18} />
                 <span>{submitFileValue?.name || "Rasm tanlash"}</span>
-                <input accept="image/*" type="file" onChange={handleSubmitFile} />
+                <input accept="image/*" type="file" disabled={isSubmitting} onChange={handleSubmitFile} />
               </label>
               <div className="action-row" style={{ marginTop: "12px" }}>
                 <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center" }} type="submit" disabled={isBusy || !submitFileValue}>
-                  <Send size={17} />
-                  Yuborish
+                  {isSubmitting ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <Send size={17} />}
+                  {isSubmitting ? "AI tekshiryapti..." : "Yuborish"}
                 </button>
               </div>
+              {isSubmitting ? renderSubmissionProcessing() : null}
             </form>
 
             <div style={{ marginTop: "1rem" }}>
-              <h4 style={{ fontSize: "0.95rem", fontWeight: 700, marginBottom: "8px" }}>Tarixiy natijalar</h4>
-              {renderSubmissions(studentSubmissions, "Hozircha natijalar yo'q. Rasm yuklab topshiring!")}
+              <div className="flex-between" style={{ marginBottom: "8px" }}>
+                <h4 style={{ fontSize: "0.95rem", fontWeight: 700, margin: 0 }}>Saqlangan AI feedbacklar</h4>
+                {isLoadingSubmissions ? <RefreshCcw size={15} style={{ animation: "spin 1.2s linear infinite", color: "var(--primary)" }} /> : null}
+              </div>
+              {renderSubmissions(submissions, "Hozircha natijalar yo'q. Rasm yuklab topshiring!")}
             </div>
           </div>
         )}
       </article>
+    );
+  }
+
+  function renderSubmissionProcessing() {
+    return (
+      <div className="submission-processing" aria-live="polite">
+        <div className="ai-loader">
+          <div className="ai-loader-ring"></div>
+          <FileCheck size={26} />
+        </div>
+        <div>
+          <strong>AI javobingizni tekshiryapti</strong>
+          <p>Rasm o'qilmoqda, yechimlar solishtirilmoqda va feedback saqlanmoqda.</p>
+          <div className="processing-steps">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
     );
   }
 

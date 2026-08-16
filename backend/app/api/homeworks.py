@@ -195,7 +195,7 @@ async def get_student_homeworks(current_user: dict = Depends(get_current_user)):
             
             # Check for submission
             subs = db.collection("submissions").where("homework_id", "==", hw.id).where("student_id", "==", current_user["id"]).stream()
-            sub_list = [s.to_dict() for s in subs]
+            sub_list = [{"id": s.id, **s.to_dict()} for s in subs]
             if sub_list:
                 # Sort in memory by submitted_at to get latest
                 sub_list.sort(key=lambda x: str(x.get("submitted_at") or ""), reverse=True)
@@ -204,6 +204,7 @@ async def get_student_homeworks(current_user: dict = Depends(get_current_user)):
                 hw_dict["latest_score"] = latest_sub.get("score")
                 hw_dict["latest_percentage"] = latest_sub.get("percentage")
                 hw_dict["attempt_count"] = latest_sub.get("attempt_number", 1)
+                hw_dict["latest_submission"] = latest_sub
             else:
                 hw_dict["student_status"] = "pending"
                 
@@ -327,4 +328,3 @@ async def get_my_submissions(homework_id: str, current_user: dict = Depends(get_
     db = get_db()
     subs = db.collection("submissions").where("homework_id", "==", homework_id).where("student_id", "==", current_user["id"]).stream()
     return sorted([{"id": s.id, **s.to_dict()} for s in subs], key=lambda x: x.get("attempt_number", 1))
-
