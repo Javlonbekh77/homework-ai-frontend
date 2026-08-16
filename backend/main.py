@@ -15,11 +15,12 @@ from app.services.firebase_service import (
     is_firebase_ready,
 )
 from app.api import auth, classes, users, homeworks
-from app.bot.handlers import router as bot_router
+from app.bot.handlers import BOT_HANDLER_VERSION, router as bot_router
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 logging.basicConfig(level=logging.INFO)
 
+APP_VERSION = "bot-start-url-fix-b41a5d4"
 bot = None
 dp = Dispatcher()
 
@@ -80,6 +81,8 @@ app.include_router(homeworks.router, prefix="/api")
 async def health_check():
     return {
         "status": "ok",
+        "app_version": APP_VERSION,
+        "bot_handler_version": BOT_HANDLER_VERSION,
         "firebase_ready": is_firebase_ready(),
         "firebase_error": get_firebase_error(),
         "env": {

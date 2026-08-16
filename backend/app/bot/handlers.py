@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, W
 
 
 router = Router()
+BOT_HANDLER_VERSION = "no-admin-env-message-2026-08-16"
 
 
 def get_web_app_url() -> str | None:
