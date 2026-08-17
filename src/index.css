@@ -5,6 +5,7 @@
   --primary-hover: #2563eb;
   --secondary: #10b981;
   --secondary-hover: #059669;
+  --green: #10b981;
   --danger: #ef4444;
   --danger-hover: #dc2626;
   --warning: #f59e0b;
@@ -312,6 +313,11 @@ p {
 .badge-orange {
   background: rgba(245, 158, 11, 0.1);
   color: var(--warning);
+}
+
+.badge-red {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
 }
 
 .badge-gray {

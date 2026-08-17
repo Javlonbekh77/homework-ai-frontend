@@ -3735,16 +3735,31 @@ export default function App() {
         const percentage = resultSubmission?.percentage ?? activeHomework.latest_percentage ?? 0;
         const gradeLabel = percentage >= 90 ? "A'lo" : percentage >= 75 ? "Yaxshi" : percentage >= 60 ? "Qoniqarli" : "Takrorlash kerak";
         const gradeBadge = percentage >= 75 ? "badge-green" : percentage >= 60 ? "badge-orange" : "badge-red";
+        const resultHeroTitle = percentage >= 80 ? "Ajoyib!" : percentage >= 60 ? "Yaxshi urinish!" : "Tekshirildi";
+        const resultHeroSubtitle = percentage >= 80
+          ? "Vazifa muvaffaqiyatli tekshirildi."
+          : percentage >= 60
+            ? "Yaxshi ketayapsiz, endi xatolarni mustahkamlaymiz."
+            : "Natija chiqdi. Xatolarni AI izoh bilan qayta ishlab chiqamiz.";
+        const resultHeroBg = percentage >= 80
+          ? "linear-gradient(135deg, var(--secondary), #059669)"
+          : percentage >= 60
+            ? "linear-gradient(135deg, #f59e0b, #d97706)"
+            : "linear-gradient(135deg, #2563eb, #1e40af)";
         const stars = Math.max(1, Math.min(5, Math.round((percentage || 0) / 20)));
         const issueRows = resultProblems.filter((problem) => problem.status && problem.status !== "correct").slice(0, 3);
 
         return (
           <div className="animate-fade-in pb-20">
             {/* Header Celebration */}
-            <div className="card" style={{ padding: "20px", background: "linear-gradient(135deg, var(--green), #059669)", color: "white", textAlign: "center", border: "none", borderRadius: "18px", marginBottom: "16px" }}>
-              <Trophy size={40} color="var(--warning)" style={{ margin: "0 auto 10px" }} />
-              <h2 style={{ color: "white", fontSize: "1.4rem", fontWeight: 800, margin: "0 0 4px" }}>Ajoyib! ðŸŽ‰</h2>
-              <p style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.85rem", margin: 0 }}>Vazifa muvaffaqiyatli tekshirildi</p>
+            <div className="card" style={{ padding: "22px", background: resultHeroBg, color: "white", textAlign: "center", border: "none", borderRadius: "18px", marginBottom: "16px", boxShadow: "0 14px 30px rgba(37,99,235,0.18)" }}>
+              <Trophy size={42} color="#fbbf24" style={{ margin: "0 auto 10px", filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.18))" }} />
+              <h2 style={{ color: "white", fontSize: "1.45rem", fontWeight: 900, margin: "0 0 6px", textShadow: "0 1px 2px rgba(0,0,0,0.18)" }}>
+                {resultHeroTitle}
+              </h2>
+              <p style={{ color: "rgba(255,255,255,0.94)", fontSize: "0.86rem", margin: 0, fontWeight: 700, lineHeight: 1.4 }}>
+                {resultHeroSubtitle}
+              </p>
             </div>
 
             {/* Score box */}
@@ -6663,7 +6678,9 @@ export default function App() {
                     borderBottomRightRadius: isUser ? "4px" : "16px",
                     boxShadow: "0 2px 4px rgba(0,0,0,0.02)",
                     fontSize: "0.9rem",
-                    lineHeight: 1.4
+                    lineHeight: 1.5,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word"
                   }}
                 >
                   {msg.text}

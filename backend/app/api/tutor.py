@@ -138,6 +138,7 @@ def _build_tutor_messages(
             f"Masala: {item.get('problem_number') or 'nomalum'}; "
             f"Holat: {item.get('status')}; "
             f"O'quvchi javobi: {item.get('student_answer') or 'korinmadi'}; "
+            f"O'quvchi qadamlari: {_compact_steps(item.get('student_steps'))}; "
             f"To'g'ri javob: {item.get('expected_answer') or 'berilmagan'}; "
             f"Xato: {item.get('label')}; "
             f"Tavsiya: {item.get('suggestion') or item.get('feedback')}"
@@ -151,8 +152,15 @@ def _build_tutor_messages(
                 "Siz Uzbek tilida gapiradigan AI tutor ekansiz. "
                 "Faqat o'quvchining tekshirilgan uy vazifasida topilgan xatolarini tushuntiring. "
                 "Agar savol shu xatolar kontekstidan tashqarida bo'lsa, muloyimlik bilan uy vazifadagi xatoga qaytaring. "
-                "Javobni qisqa, bosqichma-bosqich va ruhlantiruvchi qiling. "
-                "Yangi mustaqil masalalarni yechib bermang, faqat xato sababini va tuzatish usulini tushuntiring."
+                "Javobni juda tushunarli, bosqichma-bosqich va ruhlantiruvchi qiling. "
+                "Har javobda quyidagi formatni saqlang:\n"
+                "1. Qayerda xato ketganini 1-2 jumlada ayting.\n"
+                "2. To'g'ri yechimni formulalar va oraliq hisoblar bilan ishlab ko'rsating.\n"
+                "3. O'quvchi adashgan joyni aniq belgilang: masalan, ishora, kasr, daraja yoki amal tartibi.\n"
+                "4. Shu xatoga juda yaqin 1 ta kichik mini-misol bering va uni ham ishlab ko'rsating.\n"
+                "5. Oxirida qisqa eslab qolish qoidasini yozing.\n"
+                "Javob uzunligi 8-14 qatordan oshmasin. Markdown jadval ishlatmang. "
+                "Yangi katta mustaqil masalalarni yechib bermang, mini-misol faqat shu xatoni tushuntirish uchun bo'lsin."
             ),
         },
         {
@@ -172,6 +180,12 @@ def _build_tutor_messages(
         })
     messages.append({"role": "user", "content": student_question})
     return messages
+
+
+def _compact_steps(steps: Any) -> str:
+    if not isinstance(steps, list) or not steps:
+        return "ko'rinmadi"
+    return " | ".join(str(step)[:160] for step in steps[:4])
 
 
 def _save_tutor_message(
