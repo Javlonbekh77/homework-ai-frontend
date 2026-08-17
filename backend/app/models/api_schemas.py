@@ -12,7 +12,7 @@ class UserProfile(BaseModel):
     role: Optional[str]
 
 class UpdateRoleRequest(BaseModel):
-    role: str
+    role: Literal["teacher", "student"]
 
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = None

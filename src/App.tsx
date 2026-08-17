@@ -1600,6 +1600,10 @@ export default function App() {
   async function chooseRole(role: Role) {
 
     if (!user) return;
+    if (user.role && user.role !== role) {
+      setError("Rol allaqachon tanlangan. Teacher va student rejimlarini almashtirish yopilgan.");
+      return;
+    }
     setBusyAction(`role-${role}`);
     setError("");
     setNotice("");
@@ -1611,12 +1615,12 @@ export default function App() {
       await loadDashboard(nextUser);
       setNotice(role === "teacher" ? "O'qituvchi rejimiga o'tildi." : "O'quvchi rejimiga o'tildi.");
     } catch (caught) {
-      if (isLocalhost) {
+      if (isLocalhost && !user.role) {
         const nextUser = { ...user, role };
         setUser(nextUser);
         resetRoleViews();
         await loadDashboard(nextUser);
-        setNotice(`Rol muvaffaqiyatli ${role} ga o'zgartirildi (Mock)`);
+        setNotice(`Rol muvaffaqiyatli ${role} ga tanlandi (Mock)`);
       } else {
         setError(getErrorMessage(caught));
       }
@@ -4797,7 +4801,6 @@ export default function App() {
     const teacherSummary = teacherDashboard?.summary;
     const teacherAverage = metricPercent(teacherSummary?.average_percentage ?? 84);
     const teacherRoleText = isStudent ? "O'quvchi" : "O'qituvchi";
-    const nextRole = isStudent ? "teacher" : "student";
     const profileSaving = busyAction === "profile-save";
     const profileInitial = (user?.full_name || teacherRoleText).trim().charAt(0).toUpperCase() || "U";
 
@@ -5025,21 +5028,12 @@ export default function App() {
 
         <div className="card" style={{ padding: "18px", borderRadius: "14px" }}>
           <h3 style={{ fontSize: "0.9rem", fontWeight: 900, margin: 0, color: "var(--text-main)" }}>
-            Local test rejimi
+            Rol
           </h3>
           <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)", lineHeight: 1.45 }}>
-            Demo vaqtida rolni tez almashtirib, ikkala dizaynni ham tekshirishingiz mumkin.
+            {teacherRoleText} rejimi tanlangan. Xavfsizlik uchun role almashtirish yopilgan.
           </p>
-          <button
-            className="btn btn-outline"
-            type="button"
-            style={{ width: "100%", justifyContent: "center", background: "white", borderColor: "var(--border)", fontWeight: 800 }}
-            onClick={() => void chooseRole(nextRole)}
-            disabled={isBusy}
-          >
-            <RefreshCcw size={16} />
-            {isStudent ? "O'qituvchi rejimiga o'tish" : "O'quvchi rejimiga o'tish"}
-          </button>
+          <span className="badge badge-gray" style={{ alignSelf: "flex-start" }}>{teacherRoleText}</span>
         </div>
       </div>
     );
@@ -7279,13 +7273,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Switch role */}
-        <button
-          onClick={() => void chooseRole("teacher")}
-          style={{ width: "100%", padding: "12px", background: "white", border: "1px solid var(--border)", borderRadius: "14px", fontWeight: 700, fontSize: "0.88rem", color: "var(--text-muted)", cursor: "pointer" }}
-        >
-          O'qituvchi rejimiga o'tish
-        </button>
       </div>
     );
   }

@@ -19,6 +19,10 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 @router.patch("/me/role")
 async def update_role(req: UpdateRoleRequest, current_user: dict = Depends(get_current_user)):
+    existing_role = current_user.get("role")
+    if existing_role and existing_role != req.role:
+        raise HTTPException(status_code=403, detail="Rol allaqachon tanlangan. Uni almashtirish mumkin emas.")
+
     db = get_db()
     db.collection("users").document(current_user["id"]).update({"role": req.role})
     return {"status": "success", "role": req.role}
