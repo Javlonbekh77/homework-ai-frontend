@@ -237,6 +237,27 @@ export async function getTeacherDashboard(userId: string) {
   return res.json();
 }
 
+export async function getHomeworkBank(userId: string) {
+  const res = await fetch(`${BASE_URL}/homework-bank`, {
+    headers: { "x-user-id": userId }
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to fetch homework bank"));
+  return res.json();
+}
+
+export async function assignHomeworkBankItem(userId: string, bankItemId: string, classId: string, publish = false) {
+  const res = await fetch(`${BASE_URL}/homework-bank/${bankItemId}/assign`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-user-id": userId
+    },
+    body: JSON.stringify({ class_id: classId, publish })
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to assign homework bank item"));
+  return res.json();
+}
+
 // --- MATH LEARNING / TAXONOMY & QUESTION BANK API ---
 
 export async function getGrades(userId: string) {

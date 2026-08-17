@@ -57,6 +57,12 @@ def _chat_completion_sync(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": os.getenv(
+                "GROQ_USER_AGENT",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0 Safari/537.36 HomeworkAI/1.0",
+            ),
         },
         method="POST",
     )

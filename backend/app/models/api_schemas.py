@@ -46,6 +46,10 @@ class HomeworkApproveKeyRequest(BaseModel):
 class HomeworkPublishRequest(BaseModel):
     class_id: Optional[str] = None
 
+class HomeworkBankAssignRequest(BaseModel):
+    class_id: str
+    publish: bool = False
+
 class HomeworkUpdateRequest(BaseModel):
     max_score: Optional[int] = None
     grading_mode: Optional[str] = None

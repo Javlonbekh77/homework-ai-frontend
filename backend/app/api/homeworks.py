@@ -7,7 +7,13 @@ import json
 
 from ..services.firebase_service import get_db
 from ..services.gemini_service import extract_book_problems, evaluate_homework
-from ..models.api_schemas import HomeworkDraftRequest, HomeworkApproveKeyRequest, HomeworkPublishRequest, HomeworkUpdateRequest
+from ..models.api_schemas import (
+    HomeworkBankAssignRequest,
+    HomeworkDraftRequest,
+    HomeworkApproveKeyRequest,
+    HomeworkPublishRequest,
+    HomeworkUpdateRequest,
+)
 from .users import get_current_user
 
 router = APIRouter()
@@ -87,6 +93,88 @@ def _homework_response(doc_id: str, data: dict) -> dict:
     return {"id": doc_id, **data}
 
 
+def _bank_response(doc_id: str, data: dict) -> dict:
+    return {"id": doc_id, **data}
+
+
+def _build_bank_item_from_draft(req: HomeworkDraftRequest, current_user: dict, subject: str) -> dict:
+    created_at = datetime.utcnow()
+    return {
+        "teacher_id": current_user["id"],
+        "title": req.title,
+        "description": req.description,
+        "subject": subject,
+        "status": "draft",
+        "workflow_status": "draft_created",
+        "selected_problem_range": None,
+        "ai_generated_answer_key": None,
+        "approved_answer_key": None,
+        "answer_key_approved": False,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+
+
+def _build_assignment_from_bank(bank_item_id: str, bank_item: dict, class_id: Optional[str], class_data: Optional[dict], publish: bool = False) -> dict:
+    now = datetime.utcnow()
+    answer_key_approved = bool(bank_item.get("answer_key_approved"))
+    status = "published" if publish and answer_key_approved and class_id else "draft"
+    workflow_status = "published" if status == "published" else (bank_item.get("workflow_status") or "draft_created")
+    return {
+        "bank_item_id": bank_item_id,
+        "class_id": class_id if status == "published" else class_id,
+        "target_class_id": class_id,
+        "target_class_name": class_data.get("name") if class_data else None,
+        "teacher_id": bank_item["teacher_id"],
+        "title": bank_item.get("title") or "Nomsiz vazifa",
+        "description": bank_item.get("description"),
+        "subject": (class_data.get("subject") if class_data else None) or bank_item.get("subject") or "Matematika",
+        "status": status,
+        "workflow_status": workflow_status,
+        "selected_problem_range": bank_item.get("selected_problem_range"),
+        "ai_generated_answer_key": bank_item.get("ai_generated_answer_key"),
+        "approved_answer_key": bank_item.get("approved_answer_key"),
+        "answer_key_approved": answer_key_approved,
+        "created_at": now,
+        "updated_at": now,
+        "published_at": now if status == "published" else None,
+        "max_score": 10,
+        "allow_resubmission": True,
+    }
+
+
+def _sync_bank_item(db, homework: dict, updates: dict) -> None:
+    bank_item_id = homework.get("bank_item_id")
+    if not bank_item_id:
+        return
+    bank_ref = db.collection("homework_bank").document(bank_item_id)
+    bank_doc = bank_ref.get()
+    if not bank_doc.exists or bank_doc.to_dict().get("teacher_id") != homework.get("teacher_id"):
+        return
+    bank_updates = {
+        key: value
+        for key, value in updates.items()
+        if key in {
+            "title",
+            "description",
+            "subject",
+            "selected_problem_range",
+            "ai_generated_answer_key",
+            "approved_answer_key",
+            "answer_key_approved",
+            "workflow_status",
+        }
+    }
+    if bank_updates:
+        bank_updates["updated_at"] = datetime.utcnow()
+        bank_ref.update(bank_updates)
+        assignment_docs = db.collection("homeworks").where("bank_item_id", "==", bank_item_id).stream()
+        for assignment_doc in assignment_docs:
+            assignment = assignment_doc.to_dict()
+            if assignment.get("teacher_id") == homework.get("teacher_id"):
+                assignment_doc.reference.update(bank_updates)
+
+
 @router.post("/homeworks")
 async def create_homework_draft(req: HomeworkDraftRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "teacher":
@@ -96,25 +184,33 @@ async def create_homework_draft(req: HomeworkDraftRequest, current_user: dict = 
     target_class = None
     if req.class_id:
         target_class = _verify_teacher_class(db, req.class_id, current_user["id"])
+    subject = target_class.get("subject") if target_class else req.subject
+
+    bank_ref = db.collection("homework_bank").document()
+    bank_item = _build_bank_item_from_draft(req, current_user, subject)
 
     homework_data = {
-        "class_id": None,
+        "bank_item_id": bank_ref.id,
+        "class_id": req.class_id,
         "target_class_id": req.class_id,
         "target_class_name": target_class.get("name") if target_class else None,
         "teacher_id": current_user["id"],
         "title": req.title,
         "description": req.description,
-        "subject": target_class.get("subject") if target_class else req.subject,
+        "subject": subject,
         "status": "draft",
         "workflow_status": "draft_created",
         "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
         "max_score": 10,
         "allow_resubmission": True,
         "answer_key_approved": False
     }
 
     doc_ref = db.collection("homeworks").document()
+    bank_item["latest_assignment_id"] = doc_ref.id
     doc_ref.set(homework_data)
+    bank_ref.set(bank_item)
     return _homework_response(doc_ref.id, homework_data)
 
 
@@ -146,6 +242,69 @@ async def list_teacher_homeworks(current_user: dict = Depends(get_current_user))
     homeworks = [_homework_response(h.id, h.to_dict()) for h in hw_docs]
     homeworks.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
     return homeworks
+
+
+@router.get("/homework-bank")
+async def list_homework_bank(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can view homework bank")
+
+    db = get_db()
+    bank_docs = db.collection("homework_bank").where("teacher_id", "==", current_user["id"]).stream()
+    items = []
+    for doc in bank_docs:
+        data = doc.to_dict()
+        assignment_docs = db.collection("homeworks").where("bank_item_id", "==", doc.id).stream()
+        assignments = [_homework_response(item.id, item.to_dict()) for item in assignment_docs]
+        data["assignment_count"] = len(assignments)
+        data["assigned_class_ids"] = sorted({
+            item.get("target_class_id") or item.get("class_id")
+            for item in assignments
+            if item.get("target_class_id") or item.get("class_id")
+        })
+        items.append(_bank_response(doc.id, data))
+
+    items.sort(key=lambda item: _date_key(item.get("updated_at") or item.get("created_at")), reverse=True)
+    return items
+
+
+@router.post("/homework-bank/{bank_item_id}/assign")
+async def assign_homework_bank_item(bank_item_id: str, req: HomeworkBankAssignRequest, current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can assign homework bank items")
+
+    db = get_db()
+    bank_ref = db.collection("homework_bank").document(bank_item_id)
+    bank_doc = bank_ref.get()
+    if not bank_doc.exists or bank_doc.to_dict().get("teacher_id") != current_user["id"]:
+        raise HTTPException(status_code=404, detail="Homework bank item not found")
+
+    class_data = _verify_teacher_class(db, req.class_id, current_user["id"])
+    bank_item = bank_doc.to_dict()
+    if req.publish and not bank_item.get("answer_key_approved"):
+        raise HTTPException(status_code=400, detail="Tasdiqlanmagan vazifani publish qilib bo'lmaydi")
+
+    existing_docs = db.collection("homeworks").where("bank_item_id", "==", bank_item_id).stream()
+    for existing_doc in existing_docs:
+        existing = existing_doc.to_dict()
+        existing_class_id = existing.get("target_class_id") or existing.get("class_id")
+        if existing_class_id == req.class_id and existing.get("status") != "archived":
+            return {
+                "status": "already_assigned",
+                "homework": _homework_response(existing_doc.id, existing),
+            }
+
+    assignment = _build_assignment_from_bank(bank_item_id, bank_item, req.class_id, class_data, publish=req.publish)
+    doc_ref = db.collection("homeworks").document()
+    doc_ref.set(assignment)
+    bank_ref.update({
+        "latest_assignment_id": doc_ref.id,
+        "updated_at": datetime.utcnow(),
+    })
+    return {
+        "status": "assigned",
+        "homework": _homework_response(doc_ref.id, assignment),
+    }
 
 
 @router.get("/teacher/dashboard")
@@ -202,6 +361,7 @@ async def get_teacher_dashboard(current_user: dict = Depends(get_current_user)):
 
         homework_map[doc.id] = {
             "id": doc.id,
+            "bank_item_id": data.get("bank_item_id"),
             "class_id": class_id,
             "target_class_id": data.get("target_class_id"),
             "target_class_name": data.get("target_class_name"),
@@ -432,6 +592,7 @@ async def analyze_homework_source(
     hw = hw_ref.get()
     if not hw.exists or hw.to_dict().get("teacher_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
+    hw_dict = hw.to_dict()
 
     # save image temporarily
     ext = os.path.splitext(image.filename)[1] or ".jpg"
@@ -446,12 +607,15 @@ async def analyze_homework_source(
         
         # update homework doc with AI result
         ai_key = analysis_result.model_dump()
-        hw_ref.update({
+        updates = {
             "selected_problem_range": problem_range,
             "ai_generated_answer_key": ai_key,
             "answer_key_approved": False,
-            "workflow_status": "analyzed"
-        })
+            "workflow_status": "analyzed",
+            "updated_at": datetime.utcnow(),
+        }
+        hw_ref.update(updates)
+        _sync_bank_item(db, hw_dict, updates)
         return {"status": "success", "ai_generated_answer_key": ai_key}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -469,12 +633,16 @@ async def approve_answer_key(homework_id: str, req: HomeworkApproveKeyRequest, c
     hw = hw_ref.get()
     if not hw.exists or hw.to_dict().get("teacher_id") != current_user["id"]:
         raise HTTPException(status_code=403, detail="Access denied")
-        
-    hw_ref.update({
+
+    hw_dict = hw.to_dict()
+    updates = {
         "approved_answer_key": req.approved_answer_key,
         "answer_key_approved": True,
-        "workflow_status": "approved"
-    })
+        "workflow_status": "approved",
+        "updated_at": datetime.utcnow(),
+    }
+    hw_ref.update(updates)
+    _sync_bank_item(db, hw_dict, updates)
     return {"status": "success"}
 
 @router.patch("/homeworks/{homework_id}")
@@ -520,7 +688,8 @@ async def publish_homework(homework_id: str, req: Optional[HomeworkPublishReques
         "subject": target_class.get("subject") or hw_dict.get("subject"),
         "status": "published",
         "workflow_status": "published",
-        "published_at": datetime.utcnow()
+        "published_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
     })
     return {"status": "success"}
 

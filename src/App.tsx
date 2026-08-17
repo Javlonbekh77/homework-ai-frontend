@@ -75,6 +75,8 @@ import {
   checkDiktant,
   checkTestManual,
   checkTestScan,
+  assignHomeworkBankItem,
+  getHomeworkBank,
   sendTutorMessage,
 } from "./services/api";
 
@@ -126,6 +128,7 @@ type AnswerKey = {
 
 type Homework = {
   id: string;
+  bank_item_id?: string | null;
   class_id?: string;
   target_class_id?: string | null;
   target_class_name?: string | null;
@@ -144,6 +147,21 @@ type Homework = {
   attempt_count?: number;
   latest_submission?: Submission;
   deadline?: string | null;
+};
+
+type HomeworkBankItem = {
+  id: string;
+  title: string;
+  description?: string | null;
+  subject?: string;
+  status?: string;
+  workflow_status?: string;
+  answer_key_approved?: boolean;
+  ai_generated_answer_key?: AnswerKey;
+  approved_answer_key?: AnswerKey;
+  selected_problem_range?: string | null;
+  assignment_count?: number;
+  assigned_class_ids?: string[];
 };
 
 type ErrorDetail = {
@@ -228,7 +246,10 @@ type TeacherDashboardSubject = {
 
 type TeacherDashboardHomework = {
   id: string;
+  bank_item_id?: string | null;
   class_id?: string;
+  target_class_id?: string | null;
+  target_class_name?: string | null;
   class_name: string;
   title: string;
   subject: string;
@@ -476,6 +497,8 @@ export default function App() {
   const [classStudentsLoading, setClassStudentsLoading] = useState(false);
   const [classSubTab, setClassSubTab] = useState<"students" | "homeworks" | "grades">("students");
   const [allTeacherHomeworks, setAllTeacherHomeworks] = useState<Homework[]>([]);
+  const [homeworkBank, setHomeworkBank] = useState<HomeworkBankItem[]>([]);
+  const [homeworkBankLoading, setHomeworkBankLoading] = useState(false);
   const [expandedAnswerKeys, setExpandedAnswerKeys] = useState<string[]>([]);
   const [publishClassByHomework, setPublishClassByHomework] = useState<Record<string, string>>({});
   const [answerKeyDrafts, setAnswerKeyDrafts] = useState<Record<string, AnswerKey>>({});
@@ -781,6 +804,21 @@ export default function App() {
     setSelectedClassId("class_8a");
     setHomeworks(demoHomeworks.filter((homework) => homework.class_id === "class_8a"));
     setAllTeacherHomeworks(demoHomeworks);
+    setHomeworkBank(
+      demoHomeworks.map((homework) => ({
+        id: `bank_${homework.id}`,
+        title: homework.title,
+        description: homework.description,
+        subject: homework.subject,
+        status: homework.status,
+        workflow_status: homework.workflow_status || homework.status,
+        answer_key_approved: homework.answer_key_approved,
+        approved_answer_key: homework.approved_answer_key,
+        ai_generated_answer_key: homework.ai_generated_answer_key,
+        assignment_count: 1,
+        assigned_class_ids: homework.class_id ? [homework.class_id] : [],
+      })),
+    );
     setClassStudents([
       { id: "s1", full_name: "Saidov Asilbek", telegram_username: "asilbek", average_score: 92, submission_count: 14 },
       { id: "s2", full_name: "Karimova Dilnoza", telegram_username: "dilnoza", average_score: 88, submission_count: 12 },
@@ -953,6 +991,7 @@ export default function App() {
     setSelectedClassId("class_8a_student");
     setHomeworks(demoHomeworks);
     setAllTeacherHomeworks([]);
+    setHomeworkBank([]);
     setTeacherDashboard(null);
     setClassStudents([]);
     setSelectedTeacherClassId("");
@@ -984,6 +1023,17 @@ export default function App() {
     }
   }, []);
 
+  const loadHomeworkBank = useCallback(async (userId: string) => {
+    setHomeworkBankLoading(true);
+    try {
+      const items = (await getHomeworkBank(userId)) as HomeworkBankItem[];
+      setHomeworkBank(items);
+      return items;
+    } finally {
+      setHomeworkBankLoading(false);
+    }
+  }, []);
+
   const loadDashboard = useCallback(
     async (nextUser: User, preferredClassId = "") => {
       if (!nextUser.role) return;
@@ -1005,6 +1055,7 @@ export default function App() {
           const [allHws] = await Promise.all([
             getTeacherHomeworks(nextUser.id) as Promise<Homework[]>,
             loadTeacherAnalytics(nextUser.id),
+            loadHomeworkBank(nextUser.id),
           ]);
           setAllTeacherHomeworks(allHws);
         } else {
@@ -1023,7 +1074,7 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [loadTeacherAnalytics, loadTeacherHomeworks],
+    [loadHomeworkBank, loadTeacherAnalytics, loadTeacherHomeworks],
   );
 
   useEffect(() => {
@@ -1545,6 +1596,7 @@ export default function App() {
       await loadTeacherHomeworks(user.id, activeClassId);
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadHomeworkBank(user.id);
       await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
@@ -1574,6 +1626,7 @@ export default function App() {
       }
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadHomeworkBank(user.id);
       await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
@@ -1598,6 +1651,7 @@ export default function App() {
       }
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadHomeworkBank(user.id);
       await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
@@ -1626,6 +1680,31 @@ export default function App() {
       }
       const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
       setAllTeacherHomeworks(allHws);
+      await loadHomeworkBank(user.id);
+      await loadTeacherAnalytics(user.id);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleAssignHomeworkBankItem(bankItemId: string, classId: string) {
+    if (!user || !classId) return;
+    setBusyAction(`assign-bank-${bankItemId}`);
+    setError("");
+    setNotice("");
+    try {
+      const result = await assignHomeworkBankItem(user.id, bankItemId, classId, false);
+      setNotice(
+        result?.status === "already_assigned"
+          ? "Bu vazifa shu sinfga oldin biriktirilgan."
+          : "Vazifa bankdan sinfga biriktirildi.",
+      );
+      await loadTeacherHomeworks(user.id, classId);
+      const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
+      setAllTeacherHomeworks(allHws);
+      await loadHomeworkBank(user.id);
       await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
@@ -2041,7 +2120,7 @@ export default function App() {
     if (currentTab === "classes") {
       if (selectedTeacherClassId) {
         const activeClass = classes.find(c => c.id === selectedTeacherClassId);
-        const classHws = homeworks.filter(h => h.class_id === selectedTeacherClassId);
+        const classHws = homeworks.filter(h => (h.class_id || h.target_class_id) === selectedTeacherClassId);
         const filteredClassStudents = classStudents.filter((student) =>
           (student.full_name || "").toLowerCase().includes(teacherStudentSearch.trim().toLowerCase()) ||
           (student.telegram_username || "").toLowerCase().includes(teacherStudentSearch.trim().toLowerCase())
@@ -2225,8 +2304,11 @@ export default function App() {
                 <form className="panel" onSubmit={handleCreateHomework} style={{ margin: 0 }}>
                   <div className="panel-title">
                     <FileCheck size={20} />
-                    <h2>Yangi vazifa berish</h2>
+                    <h2>Yangi vazifa yuklash</h2>
                   </div>
+                  <p style={{ margin: "-6px 0 12px", color: "var(--text-muted)", fontSize: "0.82rem", lineHeight: 1.45 }}>
+                    Qoralama shu sinfda ochiladi va avtomatik vazifalar bankiga saqlanadi.
+                  </p>
                   <label className="input-group">
                     <input
                       className="input-field"
@@ -2239,6 +2321,8 @@ export default function App() {
                     <Plus size={18} /> Qoralama ochish
                   </button>
                 </form>
+
+                {renderHomeworkBankPicker(selectedTeacherClassId)}
 
                 <div className="stack">
                   {classHws.map((homework) => renderTeacherHomework(homework))}
@@ -2376,8 +2460,11 @@ export default function App() {
               <form className="panel" onSubmit={handleCreateHomework}>
                 <div className="panel-title">
                   <FileCheck size={20} />
-                  <h2>Yangi vazifa berish</h2>
+                  <h2>Yangi vazifa yuklash</h2>
                 </div>
+                <p style={{ margin: "-6px 0 12px", color: "var(--text-muted)", fontSize: "0.82rem", lineHeight: 1.45 }}>
+                  Qoralama tanlangan sinfda ochiladi va avtomatik vazifalar bankiga saqlanadi.
+                </p>
                 <label className="input-group">
                   <input
                     className="input-field"
@@ -2390,6 +2477,8 @@ export default function App() {
                   <Plus size={18} /> Qoralama ochish
                 </button>
               </form>
+
+              {renderHomeworkBankPicker(selectedClass.id)}
 
               <section className="stack mt-2">
                 {homeworks.map((homework) => renderTeacherHomework(homework))}
@@ -2772,6 +2861,84 @@ export default function App() {
 
         {(!demoStudents.length) && (
           <div className="empty-state compact">Sinfda hali o'quvchilar yo'q.</div>
+        )}
+      </section>
+    );
+  }
+
+  function renderHomeworkBankPicker(activeClassId: string) {
+    if (!activeClassId) return null;
+
+    const activeClass = classes.find((item) => item.id === activeClassId);
+    const assignedBankIds = new Set(
+      allTeacherHomeworks
+        .filter((homework) => (homework.class_id || homework.target_class_id) === activeClassId)
+        .map((homework) => homework.bank_item_id)
+        .filter(Boolean) as string[],
+    );
+    const bankItems = [...homeworkBank].sort((a, b) => {
+      const aMatchesSubject = a.subject === activeClass?.subject ? 1 : 0;
+      const bMatchesSubject = b.subject === activeClass?.subject ? 1 : 0;
+      return bMatchesSubject - aMatchesSubject || (b.assignment_count || 0) - (a.assignment_count || 0);
+    });
+
+    return (
+      <section className="panel" style={{ margin: 0 }}>
+        <div className="panel-title">
+          <BookOpen size={20} />
+          <h2>Vazifalar banki</h2>
+        </div>
+        <p style={{ margin: "-6px 0 12px", color: "var(--text-muted)", fontSize: "0.82rem", lineHeight: 1.45 }}>
+          Yaratilgan har bir vazifa bankda saqlanadi va keyin boshqa sinflarga ham biriktiriladi.
+        </p>
+
+        {homeworkBankLoading ? (
+          <div className="empty-state compact">Bank yuklanmoqda...</div>
+        ) : bankItems.length === 0 ? (
+          <div className="empty-state compact">Bankda hali vazifa yo'q. Avval qoralama oching.</div>
+        ) : (
+          <div style={{ display: "grid", gap: "8px" }}>
+            {bankItems.map((item) => {
+              const assigned = assignedBankIds.has(item.id) || (item.assigned_class_ids || []).includes(activeClassId);
+              const status = item.workflow_status || item.status;
+              return (
+                <div
+                  key={item.id}
+                  style={{
+                    border: "1px solid var(--border)",
+                    borderRadius: "8px",
+                    padding: "12px",
+                    background: assigned ? "rgba(16,185,129,0.04)" : "white",
+                  }}
+                >
+                  <div className="flex-between" style={{ gap: "10px", alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="flex-start" style={{ gap: "6px", marginBottom: "4px", flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: "0.9rem", color: "var(--text-main)" }}>{item.title}</strong>
+                        <span className={`badge ${statusBadge(status)}`} style={{ fontSize: "0.68rem", padding: "2px 7px" }}>
+                          {statusLabel(status)}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.45 }}>
+                        {item.subject || "Fan"} - {item.assignment_count || 0} ta sinfga biriktirilgan
+                        {item.answer_key_approved ? " - javob kaliti tayyor" : " - hali tasdiqlanmagan"}
+                      </p>
+                    </div>
+                    <button
+                      className="btn btn-outline"
+                      type="button"
+                      disabled={isBusy || assigned}
+                      onClick={() => void handleAssignHomeworkBankItem(item.id, activeClassId)}
+                      style={{ width: "auto", minWidth: "118px", padding: "0.55rem 0.7rem", fontSize: "0.78rem" }}
+                    >
+                      {assigned ? <Check size={16} /> : <Plus size={16} />}
+                      {assigned ? "Biriktirilgan" : "Biriktirish"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </section>
     );
