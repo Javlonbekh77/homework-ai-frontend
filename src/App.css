@@ -262,6 +262,20 @@
   display: none;
 }
 
+.math-formula {
+  font-size: 2rem;
+  font-weight: 900;
+  line-height: 1.15;
+  margin: 0 0 8px;
+  color: var(--text-main);
+  overflow-wrap: anywhere;
+}
+
+.math-formula sup {
+  font-size: 0.58em;
+  line-height: 0;
+}
+
 .answer-key {
   margin-top: 14px;
   padding-top: 14px;

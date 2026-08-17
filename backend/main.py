@@ -1,9 +1,11 @@
 import os
 import asyncio
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.types import Update
@@ -21,7 +23,7 @@ from app.bot.handlers import BOT_HANDLER_VERSION, router as bot_router
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 logging.basicConfig(level=logging.INFO)
 
-APP_VERSION = "teacher-results-search-dashboard"
+APP_VERSION = "uncertain-review-workflow"
 bot = None
 dp = Dispatcher()
 bot_mode = "disabled"
@@ -104,6 +106,10 @@ async def lifespan(app: FastAPI):
         await bot.session.close()
 
 app = FastAPI(lifespan=lifespan)
+
+UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", Path(__file__).resolve().parent / "uploads"))
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_ROOT)), name="uploads")
 
 
 async def start_bot_polling(active_bot: Bot) -> None:

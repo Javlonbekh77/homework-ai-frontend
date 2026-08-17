@@ -9,6 +9,13 @@ function normalizeApiBaseUrl(url: string) {
   return cleanUrl.endsWith("/api") ? cleanUrl : `${cleanUrl}/api`;
 }
 
+export function apiAssetUrl(path?: string | null) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const backendRoot = BASE_URL.replace(/\/api$/, "");
+  return `${backendRoot}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
 async function parseError(res: Response, fallback: string) {
   const data = await res.json().catch(() => null);
   if (!data?.detail) return fallback;
@@ -255,6 +262,33 @@ export async function assignHomeworkBankItem(userId: string, bankItemId: string,
     body: JSON.stringify({ class_id: classId, publish })
   });
   if (!res.ok) throw new Error(await parseError(res, "Failed to assign homework bank item"));
+  return res.json();
+}
+
+export async function getUncertainReviews(userId: string) {
+  const res = await fetch(`${BASE_URL}/homework-reviews/uncertain`, {
+    headers: { "x-user-id": userId }
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to fetch uncertain reviews"));
+  return res.json();
+}
+
+export async function reviewUncertainProblem(
+  userId: string,
+  submissionId: string,
+  problemIndex: number,
+  decision: "correct" | "incorrect" | "unrelated",
+  feedback?: string,
+) {
+  const res = await fetch(`${BASE_URL}/homework-reviews/uncertain/${submissionId}/problems/${problemIndex}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-user-id": userId
+    },
+    body: JSON.stringify({ decision, feedback })
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to review uncertain problem"));
   return res.json();
 }
 
@@ -522,6 +556,30 @@ export async function checkControlWork(
     body: formData
   });
   if (!res.ok) throw new Error(await parseError(res, "Failed to check control work"));
+  return res.json();
+}
+
+export async function analyzeControlWorkBase(
+  userId: string,
+  payload: {
+    title: string;
+    subject: string;
+    problemRange?: string;
+    image: File;
+  }
+) {
+  const formData = new FormData();
+  formData.append("title", payload.title);
+  formData.append("subject", payload.subject);
+  formData.append("problem_range", payload.problemRange || "Barcha ko'ringan savollar");
+  formData.append("image", payload.image);
+
+  const res = await fetch(`${BASE_URL}/checkers/control-work/base/analyze`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: formData
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to analyze control work base"));
   return res.json();
 }
 

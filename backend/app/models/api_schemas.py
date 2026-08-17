@@ -50,6 +50,10 @@ class HomeworkBankAssignRequest(BaseModel):
     class_id: str
     publish: bool = False
 
+class UncertainReviewRequest(BaseModel):
+    decision: Literal["correct", "incorrect", "unrelated"]
+    feedback: Optional[str] = None
+
 class HomeworkUpdateRequest(BaseModel):
     max_score: Optional[int] = None
     grading_mode: Optional[str] = None

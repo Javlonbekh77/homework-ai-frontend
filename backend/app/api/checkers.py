@@ -12,6 +12,7 @@ from ..services.firebase_service import get_db
 from ..services.gemini_service import (
     evaluate_control_work,
     evaluate_diktant,
+    extract_book_problems,
     extract_test_answers,
 )
 
@@ -181,6 +182,40 @@ async def check_test_scan(
             result=result,
         )
         return {"id": result_id, **result}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        _remove_temp_file(tmp_path)
+
+
+@router.post("/checkers/control-work/base/analyze")
+async def analyze_control_work_base(
+    title: str = Form(...),
+    subject: str = Form("Matematika"),
+    problem_range: str = Form("Barcha ko'ringan savollar"),
+    image: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    _ensure_teacher(current_user)
+    tmp_path = await _save_upload_temporarily(image)
+    try:
+        extraction = await extract_book_problems(
+            tmp_path,
+            (
+                f"Nazorat ishi: {title}. Fan: {subject}. "
+                f"{problem_range}. Savollarni ajrating, yeching va javob kaliti tayyorlang."
+            ),
+        )
+        answer_key = extraction.model_dump()
+        return {
+            "status": "success",
+            "answer_key": answer_key,
+            "problems": answer_key.get("problems", []),
+            "general_notes": answer_key.get("general_notes", ""),
+            "image_quality": answer_key.get("image_quality"),
+        }
     except HTTPException:
         raise
     except Exception as exc:

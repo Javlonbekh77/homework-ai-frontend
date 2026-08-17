@@ -42,7 +42,9 @@ import {
 } from "lucide-react";
 import "./App.css";
 import {
+  analyzeControlWorkBase,
   analyzeHomeworkSource,
+  apiAssetUrl,
   approveAnswerKey,
   authWithTelegram,
   createClass,
@@ -52,8 +54,10 @@ import {
   getHomeworkSubmissions,
   getMySubmissions,
   getStudentHomeworks,
+  getUncertainReviews,
   joinClass,
   publishHomework,
+  reviewUncertainProblem,
   searchClassByCode,
   submitHomework,
   updateProfile,
@@ -116,6 +120,7 @@ type AnswerProblem = {
   problem_text?: string;
   correct_answer?: string;
   solution_steps?: string[];
+  unreadable_parts?: string[];
   confidence?: number;
 };
 
@@ -193,6 +198,9 @@ type Submission = {
   max_score?: number;
   percentage?: number;
   status?: string;
+  review_status?: string;
+  pending_review_count?: number;
+  student_image_url?: string;
   submitted_at: string;
   grading_result?: {
     total_problems?: number;
@@ -203,6 +211,22 @@ type Submission = {
     general_feedback?: string;
     problems?: EvaluationProblem[];
   };
+};
+
+type UncertainReviewItem = {
+  id: string;
+  submission_id: string;
+  problem_index: number;
+  homework_id: string;
+  homework_title?: string;
+  class_id?: string;
+  class_name?: string;
+  student_id?: string;
+  student_name?: string;
+  attempt_number?: number;
+  submitted_at?: string;
+  student_image_url?: string;
+  problem: EvaluationProblem;
 };
 
 type TeacherDashboardSummary = {
@@ -329,6 +353,7 @@ function getErrorMessage(error: unknown) {
 function statusLabel(status?: string) {
   if (status === "published") return "Nashr qilingan";
   if (status === "graded") return "Tekshirildi";
+  if (status === "needs_review") return "Shubhali";
   if (status === "approved") return "Tasdiqlangan";
   if (status === "analyzed") return "AI tahlil qildi";
   if (status === "draft_created") return "Qoralama ochildi";
@@ -339,6 +364,7 @@ function statusLabel(status?: string) {
 function statusBadge(status?: string) {
   if (status === "published") return "badge-green";
   if (status === "graded") return "badge-green";
+  if (status === "needs_review") return "badge-orange";
   if (status === "approved") return "badge-blue";
   if (status === "analyzed") return "badge-blue";
   if (status === "draft") return "badge-orange";
@@ -506,7 +532,10 @@ export default function App() {
   const [expandedAnswerKeys, setExpandedAnswerKeys] = useState<string[]>([]);
   const [publishClassByHomework, setPublishClassByHomework] = useState<Record<string, string>>({});
   const [bankAssignClassByItem, setBankAssignClassByItem] = useState<Record<string, string>>({});
+  const [bankCreateClassId, setBankCreateClassId] = useState("");
   const [answerKeyDrafts, setAnswerKeyDrafts] = useState<Record<string, AnswerKey>>({});
+  const [uncertainReviews, setUncertainReviews] = useState<UncertainReviewItem[]>([]);
+  const [uncertainReviewsLoading, setUncertainReviewsLoading] = useState(false);
 
   // Question Bank States
   const [qbQuestions, setQbQuestions] = useState<any[]>([]);
@@ -541,11 +570,12 @@ export default function App() {
   const [qbVariantResult, setQbVariantResult] = useState<any | null>(null);
 
   // Tools Flow States
-  const [toolsActiveView, setToolsActiveView] = useState<"home" | "question_bank" | "paper_checker" | "test_checker" | "diktant_checker" | "control_work">("home");
+  const [toolsActiveView, setToolsActiveView] = useState<"home" | "question_bank" | "paper_checker" | "test_checker" | "diktant_checker" | "control_work" | "uncertain_reviews">("home");
 
   // Diktant Checker States
   const [diktantStep, setDiktantStep] = useState(1);
   const [diktantStudent, setDiktantStudent] = useState("");
+  const [diktantClassId, setDiktantClassId] = useState("");
   const [diktantText, setDiktantText] = useState("");
   const [diktantImage, setDiktantImage] = useState<File | null>(null);
   const [diktantResult, setDiktantResult] = useState<any>(null);
@@ -567,6 +597,9 @@ export default function App() {
   const [cwStep, setCwStep] = useState(1);
   const [cwStudent, setCwStudent] = useState("");
   const [cwImage, setCwImage] = useState<File | null>(null);
+  const [cwBaseImage, setCwBaseImage] = useState<File | null>(null);
+  const [cwProblemRange, setCwProblemRange] = useState("Barcha savollar");
+  const [cwAnswerKey, setCwAnswerKey] = useState<AnswerKey | null>(null);
   const [cwResult, setCwResult] = useState<any>(null);
   const [cwName, setCwName] = useState("Kvadrat tenglamalar nazorat ishi");
   const [cwClass, setCwClass] = useState("8-A");
@@ -831,6 +864,31 @@ export default function App() {
       { id: "s2", full_name: "Karimova Dilnoza", telegram_username: "dilnoza", average_score: 88, submission_count: 12 },
       { id: "s3", full_name: "Yusupov Behruz", telegram_username: "behruz", average_score: 58, submission_count: 8 },
     ]);
+    setUncertainReviews([
+      {
+        id: "demo_uncertain_1",
+        submission_id: "demo_submission_1",
+        problem_index: 2,
+        homework_id: "hw_quad",
+        homework_title: "Kvadrat tenglamalar",
+        class_id: "class_8a",
+        class_name: "8-A",
+        student_id: "s1",
+        student_name: "Saidov Asilbek",
+        attempt_number: 1,
+        submitted_at: "2026-08-17T08:30:00+05:00",
+        student_image_url: "",
+        problem: {
+          problem_number: "3",
+          status: "uncertain",
+          expected_answer: "x = -0.5 yoki x = 3",
+          student_answer: "",
+          feedback: "Yozuvning ildizlar yozilgan qismi aniq o'qilmadi.",
+          unreadable_parts: ["yakuniy javob"],
+          confidence: 0.45,
+        },
+      },
+    ]);
     setTeacherDashboard({
       generated_at: "2026-08-17T09:00:00+05:00",
       summary: {
@@ -1041,6 +1099,17 @@ export default function App() {
     }
   }, []);
 
+  const loadUncertainReviews = useCallback(async (userId: string) => {
+    setUncertainReviewsLoading(true);
+    try {
+      const items = (await getUncertainReviews(userId)) as UncertainReviewItem[];
+      setUncertainReviews(items);
+      return items;
+    } finally {
+      setUncertainReviewsLoading(false);
+    }
+  }, []);
+
   const loadDashboard = useCallback(
     async (nextUser: User, preferredClassId = "") => {
       if (!nextUser.role) return;
@@ -1063,6 +1132,7 @@ export default function App() {
             getTeacherHomeworks(nextUser.id) as Promise<Homework[]>,
             loadTeacherAnalytics(nextUser.id),
             loadHomeworkBank(nextUser.id),
+            loadUncertainReviews(nextUser.id),
           ]);
           setAllTeacherHomeworks(allHws);
         } else {
@@ -1081,7 +1151,7 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [loadHomeworkBank, loadTeacherAnalytics, loadTeacherHomeworks],
+    [loadHomeworkBank, loadTeacherAnalytics, loadTeacherHomeworks, loadUncertainReviews],
   );
 
   useEffect(() => {
@@ -1158,6 +1228,12 @@ export default function App() {
       void loadQuestionBankQuestions(user.id);
     }
   }, [currentTab, user?.role, user?.id, loadGradesList, loadQuestionBankQuestions]);
+
+  useEffect(() => {
+    if (user?.role === "teacher" && currentTab === "tools" && toolsActiveView === "uncertain_reviews") {
+      void loadUncertainReviews(user.id);
+    }
+  }, [currentTab, toolsActiveView, user?.role, user?.id, loadUncertainReviews]);
 
   useEffect(() => {
     if (user?.role === "teacher" && qbGrade !== "") {
@@ -1724,6 +1800,38 @@ export default function App() {
     }
   }
 
+  async function handleCreateBankHomework(event: FormEvent) {
+    event.preventDefault();
+    if (!user || !homeworkForm.title.trim()) return;
+    const activeClassId = bankCreateClassId || "";
+    setBusyAction("create-bank-homework");
+    setError("");
+    setNotice("");
+    try {
+      const activeClass = classes.find((c) => c.id === activeClassId);
+      await createHomework(
+        user.id,
+        activeClassId,
+        homeworkForm.title.trim(),
+        homeworkForm.description.trim(),
+        activeClass?.subject || homeworkForm.subject || "Matematika",
+      );
+      setHomeworkForm({ title: "", description: "", subject: "Matematika" });
+      setNotice(activeClassId ? "Vazifa bankda yaratildi va sinfga qoralama sifatida biriktirildi." : "Vazifa bankda qoralama sifatida yaratildi.");
+      if (activeClassId) {
+        await loadTeacherHomeworks(user.id, activeClassId);
+      }
+      const allHws = (await getTeacherHomeworks(user.id)) as Homework[];
+      setAllTeacherHomeworks(allHws);
+      await loadHomeworkBank(user.id);
+      await loadTeacherAnalytics(user.id);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function handleAssignHomeworkBankItem(bankItemId: string, classId: string) {
     if (!user || !classId) return;
     setBusyAction(`assign-bank-${bankItemId}`);
@@ -1743,6 +1851,38 @@ export default function App() {
       await loadTeacherAnalytics(user.id);
     } catch (caught) {
       setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleReviewUncertainProblem(item: UncertainReviewItem, decision: "correct" | "incorrect" | "unrelated") {
+    if (!user) return;
+    setBusyAction(`review-uncertain-${item.id}-${decision}`);
+    setError("");
+    setNotice("");
+    const feedback =
+      decision === "correct"
+        ? "Teacher ko'rib chiqdi: javob to'g'ri."
+        : decision === "incorrect"
+          ? "Teacher ko'rib chiqdi: javob noto'g'ri."
+          : "Teacher ko'rib chiqdi: bu boshqa masala yoki vazifaga tegishli emas.";
+    try {
+      await reviewUncertainProblem(user.id, item.submission_id, item.problem_index, decision, feedback);
+      setUncertainReviews((prev) => prev.filter((review) => review.id !== item.id));
+      setNotice("Shubhali javob ko'rib chiqildi va baho qayta hisoblandi.");
+      await loadUncertainReviews(user.id);
+      await loadTeacherAnalytics(user.id);
+      if (selectedClassId) {
+        await loadTeacherHomeworks(user.id, selectedClassId);
+      }
+    } catch (caught) {
+      if (isLocalhost) {
+        setUncertainReviews((prev) => prev.filter((review) => review.id !== item.id));
+        setNotice("Shubhali javob ko'rib chiqildi (Mock).");
+      } else {
+        setError(getErrorMessage(caught));
+      }
     } finally {
       setBusyAction(null);
     }
@@ -1779,7 +1919,7 @@ export default function App() {
       setStudentSubmissionHomeworkId(homeworkId);
       setStudentSubmissionsByHomework((prev) => ({ ...prev, [homeworkId]: sortSubmissions(list) }));
       setSubmitFileValue(null);
-      setNotice("Homework yuborildi va tekshirildi.");
+      setNotice(submitted.status === "needs_review" ? "Homework yuborildi. Shubhali masala ustoz review ro'yxatiga tushdi." : "Homework yuborildi va tekshirildi.");
       await loadDashboard(user);
     } catch (caught) {
       setError(getErrorMessage(caught));
@@ -1807,7 +1947,7 @@ export default function App() {
       clearStudentUploadFile();
       setStudentProgressPercent(100);
       setStudentUploadStep("result");
-      setNotice("Vazifa yuborildi va AI tomonidan tekshirildi.");
+      setNotice(submitted.status === "needs_review" ? "Vazifa yuborildi. Shubhali masala ustozga ko'rib chiqish uchun yuborildi." : "Vazifa yuborildi va AI tomonidan tekshirildi.");
       await loadDashboard(user);
     } catch (caught) {
       setStudentUploadStep("upload");
@@ -1833,17 +1973,21 @@ export default function App() {
   }
 
   function findToolStudent(studentName: string) {
-    return classStudents.find((student) => student.full_name === studentName || student.name === studentName);
+    return (
+      classStudents.find((student) => student.full_name === studentName || student.name === studentName) ||
+      teacherDashboard?.students?.find((student) => student.full_name === studentName)
+    );
   }
 
   function findToolClass(className?: string) {
-    return classes.find((item) => item.name === className) || classes.find((item) => item.id === selectedTeacherClassId);
+    return classes.find((item) => item.id === className || item.name === className) || classes.find((item) => item.id === selectedTeacherClassId);
   }
 
   async function handleCheckDiktant() {
-    if (!user || !diktantImage || !diktantStudent || !diktantText.trim()) return;
-    const student = findToolStudent(diktantStudent);
-    const activeClass = findToolClass();
+    if (!user || !diktantImage || !diktantClassId || !diktantText.trim()) return;
+    const activeClass = findToolClass(diktantClassId);
+    const studentName = activeClass ? `${activeClass.name} sinfi` : "Sinf bo'yicha diktant";
+    setDiktantStudent(studentName);
     setBusyAction("check-diktant");
     setError("");
     setNotice("");
@@ -1851,8 +1995,7 @@ export default function App() {
     try {
       const result = await checkDiktant(user.id, {
         originalText: diktantText.trim(),
-        studentName: diktantStudent,
-        studentId: student?.id,
+        studentName,
         classId: activeClass?.id,
         className: activeClass?.name,
         title: "Diktant",
@@ -1936,13 +2079,13 @@ export default function App() {
   }
 
   async function handleCheckControlWork() {
-    if (!user || !cwImage || !cwStudent) return;
+    if (!user || !cwImage || !cwStudent || !cwAnswerKey) return;
     const student = findToolStudent(cwStudent);
     const activeClass = findToolClass(cwClass);
     setBusyAction("check-control-work");
     setError("");
     setNotice("");
-    setCwStep(3);
+    setCwStep(4);
     try {
       const result = await checkControlWork(user.id, {
         title: cwName,
@@ -1952,15 +2095,55 @@ export default function App() {
         classId: activeClass?.id,
         className: activeClass?.name || cwClass,
         maxScore: cwMaxScore,
+        answerKey: cwAnswerKey,
         image: cwImage,
       });
       setCwResult(result);
-      setCwStep(4);
+      setCwStep(5);
       setNotice("Nazorat ishi AI yordamida tekshirildi.");
       await loadDashboard(user);
     } catch (caught) {
       setError(getErrorMessage(caught));
-      setCwStep(2);
+      setCwStep(3);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleAnalyzeControlWorkBase() {
+    if (!user || !cwBaseImage || !cwName.trim()) return;
+    setBusyAction("analyze-control-base");
+    setError("");
+    setNotice("");
+    try {
+      const result = await analyzeControlWorkBase(user.id, {
+        title: cwName.trim(),
+        subject: cwSubject,
+        problemRange: cwProblemRange.trim(),
+        image: cwBaseImage,
+      });
+      setCwAnswerKey(result.answer_key);
+      setNotice("Nazorat ishi base savollari tahlil qilindi. Javoblarni ko'rib chiqib tasdiqlang.");
+    } catch (caught) {
+      if (isLocalhost) {
+        setCwAnswerKey({
+          image_quality: "medium",
+          general_notes: "Mock rejim: base savollar namuna sifatida shakllantirildi.",
+          problems: [
+            {
+              problem_number: "1",
+              problem_text: "2x^2 - 5x - 3 = 0 tenglamani yeching.",
+              correct_answer: "x = -0.5; x = 3",
+              solution_steps: ["D = (-5)^2 - 4 * 2 * (-3) = 49", "x = (5 +/- 7) / 4"],
+              unreadable_parts: [],
+              confidence: 0.9,
+            },
+          ],
+        });
+        setNotice("Nazorat ishi base savollari tayyorlandi (Mock).");
+      } else {
+        setError(getErrorMessage(caught));
+      }
     } finally {
       setBusyAction(null);
     }
@@ -2064,7 +2247,7 @@ export default function App() {
                 <p>Sinflaringizni boshqaring va natijalarni kuzating</p>
               </div>
               <div className="role-arrow" style={{ background: "var(--primary)", color: "white", width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", marginLeft: "auto" }}>
-                â†’
+                &gt;
               </div>
             </button>
             <button
@@ -2081,7 +2264,7 @@ export default function App() {
                 <p>Uy vazifalarini topshiring va AI yordamida o'sib boring</p>
               </div>
               <div className="role-arrow" style={{ background: "var(--secondary)", color: "white", width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", marginLeft: "auto" }}>
-                â†’
+                &gt;
               </div>
             </button>
           </div>
@@ -2577,7 +2760,7 @@ export default function App() {
             Assalomu alaykum, {user?.full_name?.split(" ")[0] || "Ustoz"}!
           </h2>
           <p style={{ margin: "4px 0 0", fontSize: "0.95rem", color: "var(--text-muted)", fontWeight: 500 }}>
-            Bugun ajoyib dars bo'lsin! âœ¨
+            Bugun ajoyib dars bo'lsin!
           </p>
         </div>
 
@@ -2715,7 +2898,7 @@ export default function App() {
     ];
     const classAvg = 4.2;
 
-    // â”€â”€ SCREEN 8: individual student profile â”€â”€
+    // Screen 8: individual student profile
     if (selectedJournalStudentId) {
       const ds = demoStudents.find((s) => s.id === selectedJournalStudentId) || demoStudents[0];
       const studentSubs = dashboardSubmissions.filter((s) => s.student_id === selectedJournalStudentId);
@@ -2783,7 +2966,7 @@ export default function App() {
           {/* Common mistakes */}
           <div className="card" style={{ padding:'14px', marginBottom:'10px', border:'1px solid rgba(239,68,68,0.15)', background:'rgba(239,68,68,0.02)' }}>
             <h4 style={{ margin:'0 0 10px', fontSize:'0.85rem', fontWeight:800, color:'var(--danger)' }}>Ko'p uchraydigan xatolar</h4>
-            {["Belgilarga e'tibor bermaslik (â€“, +)", 'Hisoblashda adaashish'].map((s) => (
+            {["Belgilarga e'tibor bermaslik (-, +)", 'Hisoblashda adashish'].map((s) => (
               <div key={s} className="flex-start" style={{ gap:'8px', marginBottom:'6px', fontSize:'0.82rem', color:'var(--text-main)' }}>
                 <div style={{ width:'6px', height:'6px', borderRadius:'50%', background:'var(--danger)', flexShrink:0 }} />{s}
               </div>
@@ -2832,7 +3015,7 @@ export default function App() {
       );
     }
 
-    // â”€â”€ SCREEN 7: journal list â”€â”€
+    // Screen 7: journal list
     if (classStudentsLoading || dashboardLoading) {
       return (
         <section className="grade-journal-panel">
@@ -2883,7 +3066,7 @@ export default function App() {
         {demoStudents.filter((s) => s.avg < 60).length > 0 && (
           <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.18)', padding:'10px 12px', borderRadius:'12px', marginBottom:'12px' }}>
             <h5 style={{ color:'var(--danger)', display:'flex', alignItems:'center', gap:'5px', margin:'0 0 6px', fontSize:'0.8rem', fontWeight:800 }}>
-              <AlertCircle size={13} /> Diqqat â€” {demoStudents.filter((s) => s.avg < 60).length} ta past o'quvchi
+              <AlertCircle size={13} /> Diqqat - {demoStudents.filter((s) => s.avg < 60).length} ta past o'quvchi
             </h5>
             {demoStudents.filter((s) => s.avg < 60).map((s) => (
               <div key={s.id} className="flex-between" style={{ padding:'6px 8px', background:'white', borderRadius:'8px', borderLeft:'3px solid var(--danger)', marginBottom:'4px', cursor:'pointer' }}
@@ -2929,7 +3112,7 @@ export default function App() {
                 </div>
                 <span style={{ fontWeight:900, fontSize:'0.9rem', color:scoreColor, textAlign:'center' }}>{scoreVal}</span>
                 <span style={{ fontWeight:800, fontSize:'0.8rem', color: s.delta > 0 ? 'var(--green)' : s.delta < 0 ? 'var(--danger)' : 'var(--text-muted)', textAlign:'center' }}>
-                  {s.delta > 0 ? `â†‘ +${s.delta.toFixed(1)}` : s.delta < 0 ? `â†“ ${s.delta.toFixed(1)}` : '0.0'}
+                  {s.delta > 0 ? `+${s.delta.toFixed(1)}` : s.delta < 0 ? s.delta.toFixed(1) : '0.0'}
                 </span>
               </div>
             );
@@ -2983,22 +3166,51 @@ export default function App() {
           </div>
         </div>
 
-        <div className="card" style={{ padding: "14px", marginBottom: "14px", border: "1px solid rgba(59,130,246,0.16)", background: "rgba(59,130,246,0.03)" }}>
-          <div className="flex-between" style={{ gap: "12px" }}>
-            <div className="flex-start" style={{ gap: "10px" }}>
-              <div style={{ width: 38, height: 38, borderRadius: "10px", background: "rgba(59,130,246,0.1)", color: "var(--primary)", display: "grid", placeItems: "center", flexShrink: 0 }}>
-                <Plus size={19} />
-              </div>
-              <div>
-                <strong style={{ display: "block", fontSize: "0.9rem" }}>Yangi vazifa qo'shish</strong>
-                <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.35 }}>Avval sinfga kiring, qoralama oching va rasmni AI bilan tahlil qiling.</span>
-              </div>
+        <form className="card" onSubmit={handleCreateBankHomework} style={{ padding: "14px", marginBottom: "14px", border: "1px solid rgba(59,130,246,0.16)", background: "rgba(59,130,246,0.03)" }}>
+          <div className="flex-start" style={{ gap: "10px", marginBottom: "10px" }}>
+            <div style={{ width: 38, height: 38, borderRadius: "10px", background: "rgba(59,130,246,0.1)", color: "var(--primary)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+              <Plus size={19} />
             </div>
-            <button className="btn btn-primary" type="button" onClick={() => navigateTo("classes")} style={{ width: "auto", padding: "0.55rem 0.8rem", fontSize: "0.78rem" }}>
-              Sinflar
-            </button>
+            <div>
+              <strong style={{ display: "block", fontSize: "0.9rem" }}>Bankdan yangi vazifa yaratish</strong>
+              <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.35 }}>Qoralama bankda saqlanadi, tanlangan sinfga ham biriktiriladi.</span>
+            </div>
           </div>
-        </div>
+          <div style={{ display: "grid", gap: "8px" }}>
+            <input
+              className="input-field"
+              placeholder="Vazifa nomi"
+              value={homeworkForm.title}
+              onChange={(event) => setHomeworkForm({ ...homeworkForm, title: event.target.value })}
+            />
+            <textarea
+              className="input-field"
+              rows={2}
+              style={{ resize: "none" }}
+              placeholder="Qisqa tavsif"
+              value={homeworkForm.description}
+              onChange={(event) => setHomeworkForm({ ...homeworkForm, description: event.target.value })}
+            />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <select className="input-field" value={bankCreateClassId} onChange={(event) => setBankCreateClassId(event.target.value)}>
+                <option value="">Faqat bankda saqlash</option>
+                {classes.map((cls) => (
+                  <option key={cls.id} value={cls.id}>{cls.name} - {cls.subject}</option>
+                ))}
+              </select>
+              <select className="input-field" value={homeworkForm.subject} onChange={(event) => setHomeworkForm({ ...homeworkForm, subject: event.target.value })}>
+                <option value="Matematika">Matematika</option>
+                <option value="Fizika">Fizika</option>
+                <option value="Ona tili">Ona tili</option>
+              </select>
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={isBusy || !homeworkForm.title.trim()}>
+              {busyAction === "create-bank-homework" ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <Plus size={17} />}
+              {busyAction === "create-bank-homework" ? "Yaratilmoqda..." : "Qoralama yaratish"}
+            </button>
+            {busyAction === "create-bank-homework" ? renderSoftLoading("Vazifa yaratilmoqda", "Qoralama bankka saqlanib, kerak bo'lsa sinfga biriktirilmoqda.") : null}
+          </div>
+        </form>
 
         {homeworkBankLoading ? (
           renderSoftLoading("Vazifalar banki yuklanmoqda", "Saqlangan qoralamalar va biriktirilgan sinflar tekshirilmoqda.")
@@ -3733,15 +3945,20 @@ export default function App() {
         const maxScore = resultSubmission?.max_score ?? activeHomework.max_score ?? 10;
         const score = resultSubmission?.score ?? activeHomework.latest_score ?? 0;
         const percentage = resultSubmission?.percentage ?? activeHomework.latest_percentage ?? 0;
-        const gradeLabel = percentage >= 90 ? "A'lo" : percentage >= 75 ? "Yaxshi" : percentage >= 60 ? "Qoniqarli" : "Takrorlash kerak";
-        const gradeBadge = percentage >= 75 ? "badge-green" : percentage >= 60 ? "badge-orange" : "badge-red";
-        const resultHeroTitle = percentage >= 80 ? "Ajoyib!" : percentage >= 60 ? "Yaxshi urinish!" : "Tekshirildi";
-        const resultHeroSubtitle = percentage >= 80
-          ? "Vazifa muvaffaqiyatli tekshirildi."
-          : percentage >= 60
-            ? "Yaxshi ketayapsiz, endi xatolarni mustahkamlaymiz."
-            : "Natija chiqdi. Xatolarni AI izoh bilan qayta ishlab chiqamiz.";
-        const resultHeroBg = percentage >= 80
+        const pendingReview = (grading?.uncertain_count ?? resultSubmission?.pending_review_count ?? 0) > 0;
+        const gradeLabel = pendingReview ? "Teacher tekshiradi" : percentage >= 90 ? "A'lo" : percentage >= 75 ? "Yaxshi" : percentage >= 60 ? "Qoniqarli" : "Takrorlash kerak";
+        const gradeBadge = pendingReview ? "badge-orange" : percentage >= 75 ? "badge-green" : percentage >= 60 ? "badge-orange" : "badge-red";
+        const resultHeroTitle = pendingReview ? "Tekshirildi, lekin shubhali joy bor" : percentage >= 80 ? "Ajoyib!" : percentage >= 60 ? "Yaxshi urinish!" : "Tekshirildi";
+        const resultHeroSubtitle = pendingReview
+          ? "AI aniq o'qiy olmagan masalani ustoz ko'rib chiqadi. Baho keyin yangilanishi mumkin."
+          : percentage >= 80
+            ? "Vazifa muvaffaqiyatli tekshirildi."
+            : percentage >= 60
+              ? "Yaxshi ketayapsiz, endi xatolarni mustahkamlaymiz."
+              : "Natija chiqdi. Xatolarni AI izoh bilan qayta ishlab chiqamiz.";
+        const resultHeroBg = pendingReview
+          ? "linear-gradient(135deg, #f59e0b, #d97706)"
+          : percentage >= 80
           ? "linear-gradient(135deg, var(--secondary), #059669)"
           : percentage >= 60
             ? "linear-gradient(135deg, #f59e0b, #d97706)"
@@ -3765,7 +3982,7 @@ export default function App() {
             {/* Score box */}
             <div className="card" style={{ padding: "18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "16px" }}>
               <div>
-                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>BAHO</span>
+                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{pendingReview ? "VAQTINCHA BAHO" : "BAHO"}</span>
                 <div style={{ fontSize: "2rem", fontWeight: 900, color: "var(--text-main)", display: "flex", alignItems: "baseline", gap: "4px" }}>
                   {score} <span style={{ fontSize: "1rem", color: "var(--text-muted)", fontWeight: 500 }}>/ {maxScore}</span>
                 </div>
@@ -3797,6 +4014,17 @@ export default function App() {
                 <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--warning)" }}>{(grading?.missing_count ?? 0) + (grading?.uncertain_count ?? 0)} ta</div>
               </div>
             </div>
+
+            {pendingReview ? (
+              <div className="card" style={{ padding: "12px", borderRadius: "12px", border: "1px solid rgba(245,158,11,0.2)", background: "rgba(245,158,11,0.06)", marginBottom: "16px" }}>
+                <div className="flex-start" style={{ gap: "8px", alignItems: "flex-start" }}>
+                  <AlertCircle size={18} color="var(--warning)" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-main)", lineHeight: 1.45 }}>
+                    Shubhali masalalarga hozircha ball qo'yilmadi. Ustoz ko'rib chiqqach, yakuniy natija avtomatik yangilanadi.
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             {/* Topic checklist */}
             <div className="card" style={{ padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "16px" }}>
@@ -4250,7 +4478,7 @@ export default function App() {
             <div>
               <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>{homework.title}</h3>
               <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                {homework.subject} â€¢ {homework.deadline || "Muddatsiz"}
+                {homework.subject} - {homework.deadline || "Muddatsiz"}
               </p>
             </div>
           </div>
@@ -4376,8 +4604,8 @@ export default function App() {
 
               {result && (
                 <div>
-                  {/* Grid summary: Correct / Incorrect / Missing */}
-                  <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
+                  {/* Grid summary */}
+                  <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "16px" }}>
                     <div style={{ background: "rgba(16, 185, 129, 0.08)", color: "var(--secondary)", padding: "8px", borderRadius: "12px", textAlign: "center" }}>
                       <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>{result.correct_count ?? 0}</div>
                       <div style={{ fontSize: "0.65rem", fontWeight: 600 }}>To'g'ri</div>
@@ -4389,6 +4617,10 @@ export default function App() {
                     <div style={{ background: "rgba(100, 116, 139, 0.08)", color: "var(--text-muted)", padding: "8px", borderRadius: "12px", textAlign: "center" }}>
                       <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>{result.missing_count ?? 0}</div>
                       <div style={{ fontSize: "0.65rem", fontWeight: 600 }}>Yo'q</div>
+                    </div>
+                    <div style={{ background: "rgba(245, 158, 11, 0.08)", color: "var(--warning)", padding: "8px", borderRadius: "12px", textAlign: "center" }}>
+                      <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>{result.uncertain_count ?? 0}</div>
+                      <div style={{ fontSize: "0.65rem", fontWeight: 600 }}>Shubhali</div>
                     </div>
                   </div>
 
@@ -4404,20 +4636,24 @@ export default function App() {
 
                           let statusBg = "rgba(100, 116, 139, 0.05)";
                           let statusColor = "var(--text-muted)";
-                          let statusSymbol = "âšª";
+                          let statusSymbol = "";
 
                           if (isCorrect) {
                             statusBg = "rgba(16, 185, 129, 0.08)";
                             statusColor = "var(--secondary)";
-                            statusSymbol = "âœ“";
+                            statusSymbol = "OK";
                           } else if (isIncorrect) {
                             statusBg = "rgba(239, 68, 68, 0.08)";
                             statusColor = "var(--danger)";
-                            statusSymbol = "âœ—";
+                            statusSymbol = "X";
                           } else if (isMissing) {
                             statusBg = "rgba(245, 158, 11, 0.08)";
                             statusColor = "var(--warning)";
-                            statusSymbol = "?";
+                            statusSymbol = "Yo'q";
+                          } else if (prob.status === "uncertain") {
+                            statusBg = "rgba(245, 158, 11, 0.08)";
+                            statusColor = "var(--warning)";
+                            statusSymbol = "Shubhali";
                           }
 
                           return (
@@ -4434,7 +4670,7 @@ export default function App() {
                                   padding: "2px 8px",
                                   borderRadius: "8px"
                                 }}>
-                                  {statusSymbol} {prob.status?.toUpperCase() || ""}
+                                  {statusSymbol || prob.status?.toUpperCase() || ""}
                                 </span>
                               </div>
                               {prob.feedback && (
@@ -5283,7 +5519,7 @@ export default function App() {
                   fontSize: "0.8rem",
                   fontWeight: isCorrectOpt ? 700 : 500
                 }}>
-                  {String.fromCharCode(65 + oIdx)}) {opt} {isCorrectOpt && "âœ“"}
+                  {String.fromCharCode(65 + oIdx)}) {opt} {isCorrectOpt ? "To'g'ri" : ""}
                 </div>
               );
             })}
@@ -5654,22 +5890,97 @@ export default function App() {
     );
   }
 
+  function renderUncertainReviews() {
+    return (
+      <div className="animate-fade-in pb-20">
+        <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}>
+          <ArrowLeft size={14} style={{ marginRight: "4px" }}/> Orqaga
+        </button>
+        <div className="section-title" style={{ marginBottom: "1rem" }}>
+          <h2>Shubhali javoblar</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            AI aniq baholay olmagan masalalarni ko'rib chiqing. Qarordan keyin o'quvchi bahosi qayta hisoblanadi.
+          </p>
+        </div>
+
+        <div className="flex-between" style={{ marginBottom: "12px" }}>
+          <span className="badge badge-orange">{uncertainReviews.length} ta shubhali</span>
+          <button className="icon-btn" type="button" disabled={!user || uncertainReviewsLoading} onClick={() => user && void loadUncertainReviews(user.id)} title="Yangilash">
+            <RefreshCcw size={17} style={uncertainReviewsLoading ? { animation: "spin 1.2s linear infinite" } : undefined} />
+          </button>
+        </div>
+
+        {uncertainReviewsLoading ? (
+          renderSoftLoading("Shubhali javoblar yuklanmoqda", "AI noaniq deb belgilagan masalalar olinmoqda.")
+        ) : uncertainReviews.length === 0 ? (
+          <div className="empty-state">Hozircha shubhali javob yo'q.</div>
+        ) : (
+          <section style={{ display: "grid", gap: "12px" }}>
+            {uncertainReviews.map((item) => {
+              const imageSrc = apiAssetUrl(item.student_image_url);
+              const reviewBusy = busyAction?.startsWith(`review-uncertain-${item.id}`);
+              return (
+                <article key={item.id} className="card" style={{ padding: "14px", borderRadius: "14px", border: "1px solid rgba(245,158,11,0.22)" }}>
+                  <div className="flex-between" style={{ gap: "10px", alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 900 }}>{item.student_name || "O'quvchi"}</h3>
+                      <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+                        {item.class_name || "Sinf"} - {item.homework_title || "Vazifa"} - urinish {item.attempt_number || 1}
+                      </p>
+                    </div>
+                    <span className="badge badge-orange" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>
+                      {item.problem?.problem_number || item.problem_index + 1}-masala
+                    </span>
+                  </div>
+
+                  <div style={{ display: "grid", gap: "8px", padding: "10px", background: "rgba(245,158,11,0.05)", borderRadius: "10px", border: "1px solid rgba(245,158,11,0.12)" }}>
+                    <strong style={{ fontSize: "0.84rem", color: "var(--text-main)" }}>{item.problem?.feedback || "AI bu masalani ishonch bilan baholay olmadi."}</strong>
+                    {item.problem?.student_answer ? (
+                      <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Student javobi: {item.problem.student_answer}</span>
+                    ) : null}
+                    {item.problem?.expected_answer ? (
+                      <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>Kutilgan javob: {item.problem.expected_answer}</span>
+                    ) : null}
+                  </div>
+
+                  {imageSrc ? (
+                    <div style={{ marginTop: "10px", border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden", background: "var(--background)" }}>
+                      <img src={imageSrc} alt="Student yuborgan rasm" style={{ width: "100%", maxHeight: "260px", objectFit: "contain", display: "block" }} />
+                    </div>
+                  ) : (
+                    <div className="empty-state compact">Rasm URL topilmadi. Yangi submissionlarda rasm shu yerda ko'rinadi.</div>
+                  )}
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginTop: "10px" }}>
+                    <button className="btn btn-secondary" type="button" disabled={isBusy} style={{ padding: "0.62rem 0.4rem", fontSize: "0.76rem" }} onClick={() => void handleReviewUncertainProblem(item, "correct")}>
+                      {busyAction === `review-uncertain-${item.id}-correct` ? <RefreshCcw size={15} style={{ animation: "spin 1.2s linear infinite" }} /> : <Check size={15} />}
+                      To'g'ri
+                    </button>
+                    <button className="btn btn-danger" type="button" disabled={isBusy} style={{ padding: "0.62rem 0.4rem", fontSize: "0.76rem" }} onClick={() => void handleReviewUncertainProblem(item, "incorrect")}>
+                      {busyAction === `review-uncertain-${item.id}-incorrect` ? <RefreshCcw size={15} style={{ animation: "spin 1.2s linear infinite" }} /> : <X size={15} />}
+                      Noto'g'ri
+                    </button>
+                    <button className="btn btn-outline" type="button" disabled={isBusy} style={{ padding: "0.62rem 0.4rem", fontSize: "0.74rem" }} onClick={() => void handleReviewUncertainProblem(item, "unrelated")}>
+                      {busyAction === `review-uncertain-${item.id}-unrelated` ? <RefreshCcw size={15} style={{ animation: "spin 1.2s linear infinite" }} /> : <AlertCircle size={15} />}
+                      Boshqa
+                    </button>
+                  </div>
+                  {reviewBusy ? renderSoftLoading("Qaror saqlanmoqda", "Submission qayta hisoblanib, student natijasi yangilanmoqda.") : null}
+                </article>
+              );
+            })}
+          </section>
+        )}
+      </div>
+    );
+  }
+
   function renderTeacherTools() {
     if (toolsActiveView === "question_bank") return renderQuestionBank();
     if (toolsActiveView === "diktant_checker") return renderDiktantChecker();
     if (toolsActiveView === "test_checker") return renderTestChecker();
     if (toolsActiveView === "control_work") return renderControlWorkChecker();
-    if (toolsActiveView === "paper_checker") return (
-      <div className="animate-fade-in pb-20">
-        <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}><ArrowLeft size={14} style={{ marginRight: "4px" }}/> Orqaga</button>
-        <div className="section-title"><h2>AI Paper Checker</h2></div>
-        <div className="card text-center" style={{ padding: "24px" }}>
-           <Camera size={40} style={{ opacity: 0.5, margin: "0 auto 12px" }} />
-           <p className="text-muted mb-3">Bu xususiyat endi Asosiy <b>Vazifalar</b> menyusi ichida to'g'ridan-to'g'ri ishlaydi.</p>
-           <button className="btn btn-primary" onClick={() => navigateTo("homeworks")}>Vazifalarga o'tish</button>
-        </div>
-      </div>
-    );
+    if (toolsActiveView === "uncertain_reviews") return renderUncertainReviews();
 
     return (
       <div className="animate-fade-in pb-20">
@@ -5681,16 +5992,6 @@ export default function App() {
         </div>
         
         <div style={{ display: "grid", gap: "12px" }}>
-          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("question_bank")}>
-            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(59, 130, 246, 0.1)", display: "grid", placeItems: "center", color: "var(--primary)", flexShrink: 0 }}>
-              <BookOpen size={24} />
-            </div>
-            <div>
-              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>Savollar banki</h3>
-              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Materiallardan savollar bazasi</p>
-            </div>
-          </button>
-
           <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("control_work")}>
             <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.1)", display: "grid", placeItems: "center", color: "var(--secondary)", flexShrink: 0 }}>
               <FileCheck size={24} />
@@ -5720,14 +6021,17 @@ export default function App() {
               <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Imlo va diktantlarni tekshirish</p>
             </div>
           </button>
-          
-          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("paper_checker")}>
-            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(100, 116, 139, 0.1)", display: "grid", placeItems: "center", color: "var(--text-muted)", flexShrink: 0 }}>
-              <Camera size={24} />
+
+          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("uncertain_reviews")}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(245, 158, 11, 0.1)", display: "grid", placeItems: "center", color: "var(--warning)", flexShrink: 0 }}>
+              <AlertCircle size={24} />
             </div>
-            <div>
-              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>AI Paper Checker</h3>
-              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Vazifalar bo'limiga ko'chirildi</p>
+            <div style={{ flex: 1 }}>
+              <div className="flex-between" style={{ gap: "8px" }}>
+                <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>Shubhali javoblar</h3>
+                <span className="badge badge-orange" style={{ fontSize: "0.68rem", padding: "2px 7px" }}>{uncertainReviews.length}</span>
+              </div>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>AI aniq o'qiy olmagan masalalarni teacher hal qiladi</p>
             </div>
           </button>
         </div>
@@ -5750,13 +6054,19 @@ export default function App() {
 
         {diktantStep === 1 && (
            <div className="card">
-              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>1. Sinf va O'quvchini tanlang</h3>
-              <select className="input-field" style={{ marginBottom: "16px" }} value={diktantStudent} onChange={e => setDiktantStudent(e.target.value)}>
-                 <option value="">Sinf va o'quvchini tanlang...</option>
-                 <option value="Ali Valiyev">8-A: Ali Valiyev</option>
-                 <option value="Madina Karimova">8-A: Madina Karimova</option>
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>1. Sinfni tanlang</h3>
+              <select className="input-field" style={{ marginBottom: "16px" }} value={diktantClassId} onChange={e => setDiktantClassId(e.target.value)}>
+                 <option value="">Sinfni tanlang...</option>
+                 {classes.length ? classes.map((cls) => (
+                   <option key={cls.id} value={cls.id}>{cls.name} - {cls.subject}</option>
+                 )) : (
+                   <>
+                     <option value="8-A">8-A - Ona tili</option>
+                     <option value="9-B">9-B - Ona tili</option>
+                   </>
+                 )}
               </select>
-              <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setDiktantStep(2)} disabled={!diktantStudent}>Keyingi qadam</button>
+              <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setDiktantStep(2)} disabled={!diktantClassId}>Keyingi qadam</button>
            </div>
         )}
 
@@ -5770,7 +6080,7 @@ export default function App() {
 
         {diktantStep === 3 && (
            <div className="card">
-              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>3. O'quvchi ishi</h3>
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>3. Sinf diktant ishi</h3>
               <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "12px" }}>Matn to'liq ko'rinsin, rasm tiniq bo'lsin.</p>
               <label className="file-picker" style={{ marginBottom: "16px", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px", border: "2px dashed var(--border)", borderRadius: "12px", cursor: "pointer", background: "var(--background)" }}>
                 <Camera size={32} color="var(--primary)" style={{ marginBottom: "8px" }} />
@@ -5800,6 +6110,9 @@ export default function App() {
               <div style={{ padding: "16px", background: "var(--surface)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                  <div>
                    <h3 style={{ margin: 0, fontSize: "1.1rem" }}>{diktantStudent}</h3>
+                   <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                     {findToolClass(diktantClassId)?.name || diktantClassId}
+                   </p>
                    <span className="badge badge-green mt-1" style={{ fontSize: "0.75rem", display: "inline-block" }}>Yaxshi natija</span>
                  </div>
                  
@@ -5886,7 +6199,7 @@ export default function App() {
                  </div>
 
                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button className="btn btn-primary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} onClick={() => { setNotice("Natija tasdiqlandi!"); setDiktantStep(1); setDiktantImage(null); setDiktantText(""); setDiktantStudent(""); }}>
+                    <button className="btn btn-primary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} onClick={() => { setNotice("Natija tasdiqlandi!"); setDiktantStep(1); setDiktantImage(null); setDiktantText(""); setDiktantStudent(""); setDiktantClassId(""); }}>
                       <Check size={16}/> Tasdiqlash
                     </button>
                     <button className="btn btn-outline" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} onClick={() => setNotice("Jurnalga qo'shildi!")}>
@@ -6093,6 +6406,20 @@ export default function App() {
   }
 
   function renderControlWorkChecker() {
+    const activeClass = findToolClass(cwClass);
+    const dashboardStudents = teacherDashboard?.students?.filter((student) => !activeClass?.id || student.class_ids?.includes(activeClass.id)) || [];
+    const toolStudents = classStudents.length ? classStudents : dashboardStudents.length ? dashboardStudents : [
+      { id: "demo_ali", full_name: "Ali Valiyev" },
+      { id: "demo_madina", full_name: "Madina Karimova" },
+    ];
+    const cwProblems = cwAnswerKey?.problems || [];
+    const updateCwAnswerProblem = (index: number, updates: Partial<AnswerProblem>) => {
+      if (!cwAnswerKey) return;
+      const nextProblems = [...(cwAnswerKey.problems || [])];
+      nextProblems[index] = { ...nextProblems[index], ...updates };
+      setCwAnswerKey({ ...cwAnswerKey, problems: nextProblems });
+    };
+
     return (
       <div className="animate-fade-in pb-20">
         <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}>
@@ -6121,9 +6448,25 @@ export default function App() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
                 <div>
                   <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Sinf</label>
-                  <select className="input-field" value={cwClass} onChange={e => setCwClass(e.target.value)}>
-                     <option value="8-A">8-A</option>
-                     <option value="9-B">9-B</option>
+                  <select
+                    className="input-field"
+                    value={cwClass}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      const nextClass = classes.find((cls) => cls.id === nextValue || cls.name === nextValue);
+                      setCwClass(nextValue);
+                      setCwStudent("");
+                      if (nextClass) setCwSubject(nextClass.subject);
+                    }}
+                  >
+                     {classes.length ? classes.map((cls) => (
+                       <option key={cls.id} value={cls.name}>{cls.name}</option>
+                     )) : (
+                       <>
+                         <option value="8-A">8-A</option>
+                         <option value="9-B">9-B</option>
+                       </>
+                     )}
                   </select>
                 </div>
                 <div>
@@ -6144,20 +6487,87 @@ export default function App() {
                    <option value="Kimyo">Kimyo</option>
                 </select>
               </div>
-              <button className="btn btn-primary" style={{ width: "100%", marginTop: "8px" }} onClick={() => setCwStep(2)}>Yaratish</button>
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", marginTop: "8px" }}
+                onClick={() => {
+                  setCwBaseImage(null);
+                  setCwAnswerKey(null);
+                  setCwImage(null);
+                  setCwResult(null);
+                  setCwStep(2);
+                }}
+              >
+                Base yaratish
+              </button>
            </div>
         )}
 
         {cwStep === 2 && (
            <div className="card animate-fade-in">
               <div className="flex-between" style={{ marginBottom: "16px" }}>
-                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>Tekshirish</h3>
-                 <span className="badge badge-gray" style={{ background: "rgba(139, 92, 246, 0.1)", color: "#8b5cf6" }}>{cwSubject}</span>
+                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>Base savollar</h3>
+                 <span className="badge badge-gray" style={{ background: "rgba(139, 92, 246, 0.1)", color: "#8b5cf6" }}>{activeClass?.name || cwClass}</span>
+              </div>
+              <p style={{ margin: "0 0 12px", fontSize: "0.82rem", color: "var(--text-muted)", lineHeight: 1.45 }}>
+                Savollar rasmi yuklanadi, AI javob kalitini shakllantiradi. Ustoz uni tahrirlab, keyin o'quvchi ishlarini ketma-ket tekshiradi.
+              </p>
+              <input
+                className="input-field"
+                style={{ marginBottom: "12px" }}
+                value={cwProblemRange}
+                onChange={(event) => setCwProblemRange(event.target.value)}
+                placeholder="Masalan: 1-variant, 1-5 savollar"
+              />
+              <label className="file-picker" style={{ marginBottom: "16px", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px", border: "2px dashed var(--border)", borderRadius: "12px", cursor: "pointer", background: "var(--background)" }}>
+                <Upload size={32} color="var(--primary)" style={{ marginBottom: "8px" }} />
+                <span style={{ fontSize: "0.9rem", color: "var(--primary)", fontWeight: 600 }}>{cwBaseImage ? cwBaseImage.name : "Nazorat savollari rasmini yuklang"}</span>
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => setCwBaseImage(e.target.files?.[0] || null)} />
+              </label>
+
+              <button className="btn btn-primary" style={{ width: "100%" }} disabled={!cwBaseImage || busyAction === "analyze-control-base"} onClick={() => void handleAnalyzeControlWorkBase()}>
+                {busyAction === "analyze-control-base" ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <FileCheck size={18} />}
+                {busyAction === "analyze-control-base" ? "AI tahlil qilmoqda..." : "Base ni AI bilan tahlil qilish"}
+              </button>
+              {busyAction === "analyze-control-base" ? renderSoftLoading("Base savollar tahlil qilinmoqda", "AI savollarni o'qib, javob kalitini shakllantirmoqda.") : null}
+
+              {cwAnswerKey ? (
+                <div style={{ display: "grid", gap: "10px", marginTop: "14px" }}>
+                  <div className="flex-between">
+                    <strong style={{ fontSize: "0.9rem" }}>Javob kaliti</strong>
+                    <span className="badge badge-blue" style={{ fontSize: "0.68rem", padding: "2px 7px" }}>{cwProblems.length} ta savol</span>
+                  </div>
+                  {cwProblems.map((problem, index) => (
+                    <div key={`${problem.problem_number}-${index}`} style={{ display: "grid", gap: "8px", padding: "10px", background: "var(--background)", borderRadius: "10px", border: "1px solid var(--border)" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "74px 1fr", gap: "8px" }}>
+                        <input className="input-field" value={problem.problem_number || ""} onChange={(event) => updateCwAnswerProblem(index, { problem_number: event.target.value })} placeholder="#" />
+                        <input className="input-field" value={problem.correct_answer || ""} onChange={(event) => updateCwAnswerProblem(index, { correct_answer: event.target.value })} placeholder="To'g'ri javob" />
+                      </div>
+                      <textarea className="input-field" rows={2} style={{ resize: "none" }} value={problem.problem_text || ""} onChange={(event) => updateCwAnswerProblem(index, { problem_text: event.target.value })} placeholder="Savol matni" />
+                    </div>
+                  ))}
+                  {cwProblems.length === 0 ? <div className="empty-state compact">AI savol ajrata olmadi. Rasmni aniqroq yuklang.</div> : null}
+                  <button className="btn btn-secondary" type="button" disabled={!cwProblems.length} onClick={() => setCwStep(3)}>
+                    <Check size={17} /> Base ni tasdiqlash
+                  </button>
+                </div>
+              ) : null}
+           </div>
+        )}
+
+        {cwStep === 3 && (
+           <div className="card animate-fade-in">
+              <div className="flex-between" style={{ marginBottom: "16px" }}>
+                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>O'quvchi ishini tekshirish</h3>
+                 <span className="badge badge-green" style={{ fontSize: "0.7rem" }}>Base tayyor</span>
               </div>
               <select className="input-field" style={{ marginBottom: "16px" }} value={cwStudent} onChange={e => setCwStudent(e.target.value)}>
                  <option value="">O'quvchini tanlang...</option>
-                 <option value="Ali Valiyev">Ali Valiyev</option>
-                 <option value="Madina Karimova">Madina Karimova</option>
+                 {toolStudents.map((student) => (
+                   <option key={student.id || student.full_name || student.name} value={student.full_name || student.name}>
+                     {student.full_name || student.name}
+                   </option>
+                 ))}
               </select>
 
               <label className="file-picker" style={{ marginBottom: "16px", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px", border: "2px dashed var(--border)", borderRadius: "12px", cursor: "pointer", background: "var(--background)" }}>
@@ -6174,7 +6584,7 @@ export default function App() {
            </div>
         )}
 
-        {cwStep === 3 && (
+        {cwStep === 4 && (
            <div className="card text-center animate-fade-in" style={{ padding: "3rem 1rem" }}>
               <RefreshCcw size={40} style={{ animation: "spin 1.5s linear infinite", marginBottom: "1rem", color: "var(--primary)", margin: "0 auto 1rem" }} />
               <h3 style={{ fontSize: "1.1rem" }}>Nazorat ishi tahlil qilinmoqda...</h3>
@@ -6182,7 +6592,7 @@ export default function App() {
            </div>
         )}
 
-        {cwStep === 4 && cwResult && (
+        {cwStep === 5 && cwResult && (
            <div className="card animate-fade-in">
               <div className="flex-between mb-3">
                  <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800 }}>{cwStudent}</h3>
@@ -6248,7 +6658,7 @@ export default function App() {
               </div>
 
               <div style={{ display: "flex", gap: "8px" }}>
-                 <button className="btn btn-primary" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Tasdiqlandi"); setCwStep(2); setCwStudent(""); setCwImage(null); }}><Check size={16}/> Tasdiqlash</button>
+                 <button className="btn btn-primary" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Tasdiqlandi"); setCwStep(3); setCwStudent(""); setCwImage(null); }}><Check size={16}/> Keyingi o'quvchi</button>
                  <button className="btn btn-outline" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Jurnalga qo'shildi!"); setToolsActiveView("home"); }}><BookType size={16}/> Jurnalga</button>
               </div>
            </div>
@@ -6385,9 +6795,9 @@ export default function App() {
           {/* Math question card */}
           <div className="card" style={{ padding: "1.8rem 1.5rem", borderRadius: "18px", border: "1px solid var(--border)", textAlign: "center", marginBottom: "1.2rem", background: "white" }}>
             <p style={{ margin: "0 0 8px", fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 600 }}>TENGLAMANING ILDIZLARINI TOPING</p>
-            <h2 style={{ fontSize: "2rem", fontWeight: 900, margin: "0 0 8px", letterSpacing: "1px", color: "var(--text-main)" }}>
-              2xÂ² - 5x - 3 = 0
-            </h2>
+            <div className="math-formula">
+              2x<sup>2</sup> - 5x - 3 = 0
+            </div>
             <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--primary)", fontWeight: 700 }}>Kichik ildizini kiriting</p>
           </div>
 
@@ -6429,7 +6839,7 @@ export default function App() {
               style={{ gridColumn: "span 3", height: "44px", borderRadius: "10px", fontSize: "0.9rem", fontWeight: 800, border: "1px solid var(--border)", background: "#fee2e2", color: "var(--danger)" }}
               onClick={() => handleNumpad("back")}
             >
-              âŒ« O'chirish
+              O'chirish
             </button>
           </div>
 
@@ -6459,7 +6869,9 @@ export default function App() {
             <div style={{ width: "90px", height: "90px", borderRadius: "50%", background: "rgba(16, 185, 129, 0.1)", display: "grid", placeItems: "center", margin: "0 auto" }}>
               <Trophy size={48} color="var(--warning)" />
             </div>
-            <div style={{ position: "absolute", top: -5, right: -5, animation: "bounce 2s infinite" }}>ðŸŽ‰</div>
+            <div style={{ position: "absolute", top: -5, right: -5, animation: "bounce 2s infinite" }}>
+              <Star size={18} color="var(--warning)" fill="var(--warning)" />
+            </div>
           </div>
 
           <h2 style={{ fontSize: "1.5rem", fontWeight: 900, margin: "0 0 6px", color: "var(--text-main)" }}>Takrorlash yakunlandi!</h2>
@@ -6487,7 +6899,7 @@ export default function App() {
           {/* Badge Achievement Card */}
           <div className="card" style={{ padding: "14px 16px", borderRadius: "14px", border: "1px solid rgba(59, 130, 246, 0.2)", background: "rgba(59, 130, 246, 0.03)", display: "flex", gap: "12px", alignItems: "center", textAlign: "left", width: "100%", marginBottom: "1.5rem" }}>
             <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "white", display: "grid", placeItems: "center", fontSize: "1.1rem" }}>
-              ðŸŽ–ï¸
+              <Trophy size={20} />
             </div>
             <div>
               <h4 style={{ margin: 0, fontSize: "0.85rem", fontWeight: 800 }}>Yangi Yutuq!</h4>

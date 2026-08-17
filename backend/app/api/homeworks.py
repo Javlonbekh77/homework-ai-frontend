@@ -4,6 +4,8 @@ from datetime import datetime
 import tempfile
 import os
 import json
+import uuid
+from pathlib import Path
 
 from ..services.firebase_service import get_db
 from ..services.gemini_service import extract_book_problems, evaluate_homework
@@ -13,10 +15,12 @@ from ..models.api_schemas import (
     HomeworkApproveKeyRequest,
     HomeworkPublishRequest,
     HomeworkUpdateRequest,
+    UncertainReviewRequest,
 )
 from .users import get_current_user
 
 router = APIRouter()
+UPLOAD_ROOT = Path(os.getenv("UPLOAD_ROOT", Path(__file__).resolve().parents[2] / "uploads"))
 
 
 def _as_float(value, default: float = 0.0) -> float:
@@ -78,6 +82,58 @@ def _latest_at(rows):
     if not rows:
         return None
     return max((row.get("submitted_at") for row in rows), key=_date_key)
+
+
+def _safe_upload_ext(filename: Optional[str]) -> str:
+    ext = os.path.splitext(filename or "")[1].lower()
+    return ext if ext in {".jpg", ".jpeg", ".png", ".webp", ".heic"} else ".jpg"
+
+
+def _save_persistent_upload(content: bytes, filename: Optional[str], folder: str) -> str:
+    upload_dir = UPLOAD_ROOT / folder
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex}{_safe_upload_ext(filename)}"
+    path = upload_dir / safe_name
+    path.write_bytes(content)
+    return f"/uploads/{folder}/{safe_name}"
+
+
+def _normalize_homework_counts(eval_dict: dict) -> dict:
+    problems = eval_dict.get("problems") or []
+    counts = {"correct": 0, "incorrect": 0, "missing": 0, "uncertain": 0}
+    for problem in problems:
+        status = problem.get("status")
+        if status in counts:
+            counts[status] += 1
+
+    if problems:
+        eval_dict["correct_count"] = counts["correct"]
+        eval_dict["incorrect_count"] = counts["incorrect"]
+        eval_dict["missing_count"] = counts["missing"]
+        eval_dict["uncertain_count"] = counts["uncertain"]
+        eval_dict["total_problems"] = max(int(_as_float(eval_dict.get("total_problems"), len(problems))), len(problems))
+
+    return eval_dict
+
+
+def _score_homework_result(eval_dict: dict, max_score: float) -> tuple[float, float, int]:
+    eval_dict = _normalize_homework_counts(eval_dict)
+    total = int(_as_float(eval_dict.get("total_problems"), len(eval_dict.get("problems") or [])))
+    correct = int(_as_float(eval_dict.get("correct_count"), 0))
+    uncertain = int(_as_float(eval_dict.get("uncertain_count"), 0))
+    graded_total = max(0, total - uncertain)
+    if graded_total <= 0:
+        return 0.0, 0.0, graded_total
+    percentage = (correct / graded_total) * 100
+    return round((percentage / 100) * max_score, 1), round(percentage, 1), graded_total
+
+
+def _verify_teacher_homework(db, homework_id: str, teacher_id: str) -> tuple[dict, object]:
+    hw_ref = db.collection("homeworks").document(homework_id)
+    hw = hw_ref.get()
+    if not hw.exists or hw.to_dict().get("teacher_id") != teacher_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return hw.to_dict(), hw_ref
 
 
 # ----------------- TEACHER ENDPOINTS -----------------
@@ -733,6 +789,134 @@ async def get_homework_submissions(homework_id: str, current_user: dict = Depend
     )
 
 
+@router.get("/homework-reviews/uncertain")
+async def list_uncertain_homework_reviews(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can review uncertain submissions")
+
+    db = get_db()
+    teacher_id = current_user["id"]
+    homework_docs = list(db.collection("homeworks").where("teacher_id", "==", teacher_id).stream())
+    homework_map = {doc.id: doc.to_dict() for doc in homework_docs}
+    class_cache = {}
+    student_cache = {}
+    review_items = []
+
+    for homework_id, homework in homework_map.items():
+        submission_docs = db.collection("submissions").where("homework_id", "==", homework_id).stream()
+        for submission_doc in submission_docs:
+            submission = submission_doc.to_dict()
+            grading = submission.get("grading_result") or {}
+            problems = grading.get("problems") or []
+            if not problems:
+                continue
+
+            class_id = submission.get("class_id") or homework.get("class_id")
+            if class_id and class_id not in class_cache:
+                class_doc = db.collection("classes").document(class_id).get()
+                class_cache[class_id] = class_doc.to_dict() if class_doc.exists else {}
+
+            student_id = submission.get("student_id")
+            if student_id and student_id not in student_cache:
+                student_doc = db.collection("users").document(student_id).get()
+                student_cache[student_id] = student_doc.to_dict() if student_doc.exists else {}
+
+            for index, problem in enumerate(problems):
+                if problem.get("status") != "uncertain":
+                    continue
+
+                review_items.append({
+                    "id": f"{submission_doc.id}:{index}",
+                    "submission_id": submission_doc.id,
+                    "problem_index": index,
+                    "homework_id": homework_id,
+                    "homework_title": homework.get("title") or "Nomsiz vazifa",
+                    "class_id": class_id,
+                    "class_name": class_cache.get(class_id, {}).get("name") if class_id else None,
+                    "student_id": student_id,
+                    "student_name": student_cache.get(student_id, {}).get("full_name") or "Noma'lum o'quvchi",
+                    "attempt_number": submission.get("attempt_number", 1),
+                    "submitted_at": submission.get("submitted_at"),
+                    "student_image_url": submission.get("student_image_url"),
+                    "problem": problem,
+                })
+
+    review_items.sort(key=lambda item: _date_key(item.get("submitted_at")), reverse=True)
+    return review_items
+
+
+@router.post("/homework-reviews/uncertain/{submission_id}/problems/{problem_index}")
+async def review_uncertain_homework_problem(
+    submission_id: str,
+    problem_index: int,
+    req: UncertainReviewRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user.get("role") != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can review uncertain submissions")
+
+    db = get_db()
+    sub_ref = db.collection("submissions").document(submission_id)
+    sub_doc = sub_ref.get()
+    if not sub_doc.exists:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission = sub_doc.to_dict()
+    homework_id = submission.get("homework_id")
+    if not homework_id:
+        raise HTTPException(status_code=400, detail="Submission has no homework")
+    homework, _ = _verify_teacher_homework(db, homework_id, current_user["id"])
+
+    grading = submission.get("grading_result") or {}
+    problems = grading.get("problems") or []
+    if problem_index < 0 or problem_index >= len(problems):
+        raise HTTPException(status_code=404, detail="Problem not found")
+
+    problem = problems[problem_index]
+    if problem.get("status") != "uncertain":
+        raise HTTPException(status_code=400, detail="Bu masala shubhali statusida emas")
+
+    decision_label = {
+        "correct": "Teacher to'g'ri deb tasdiqladi.",
+        "incorrect": "Teacher noto'g'ri deb belgiladi.",
+        "unrelated": "Teacher bu javob vazifaga tegishli emas deb belgiladi.",
+    }[req.decision]
+    problem["status"] = "correct" if req.decision == "correct" else "incorrect"
+    problem["feedback"] = req.feedback or decision_label
+    problem["teacher_review"] = {
+        "decision": req.decision,
+        "feedback": req.feedback,
+        "reviewed_by": current_user["id"],
+        "reviewed_at": datetime.utcnow(),
+    }
+    if req.decision == "unrelated":
+        problem.setdefault("errors", []).append({
+            "step": "teacher_review",
+            "description": "Yuborilgan yechim bu masalaga tegishli emas.",
+            "suggestion": "Daftardagi aynan shu masalaning yechimini qayta yuboring.",
+        })
+    problems[problem_index] = problem
+    grading["problems"] = problems
+    _normalize_homework_counts(grading)
+
+    max_score = submission.get("max_score") or homework.get("max_score") or 10
+    score, percentage, graded_total = _score_homework_result(grading, max_score)
+    pending_review_count = int(_as_float(grading.get("uncertain_count"), 0))
+
+    updates = {
+        "grading_result": grading,
+        "score": score,
+        "percentage": percentage,
+        "graded_problem_count": graded_total,
+        "pending_review_count": pending_review_count,
+        "review_status": "needs_review" if pending_review_count else "reviewed",
+        "status": "needs_review" if pending_review_count else "graded",
+        "updated_at": datetime.utcnow(),
+    }
+    sub_ref.update(updates)
+    return {"id": submission_id, **submission, **updates}
+
+
 # ----------------- STUDENT ENDPOINTS -----------------
 
 @router.get("/student/homeworks")
@@ -862,19 +1046,16 @@ async def submit_homework(
             raise HTTPException(status_code=400, detail="Yuklangan rasm bo'sh")
         tmp.write(content)
         tmp_path = tmp.name
+    student_image_url = _save_persistent_upload(content, image.filename, "submissions")
 
     try:
         # evaluate
         evaluation = await evaluate_homework(tmp_path, json.dumps(answer_key, ensure_ascii=False))
         eval_dict = evaluation.model_dump()
-        
-        # calculate max score and score correctly
-        # for MVP we can use correct_count as score if equal weights
-        total = eval_dict.get("total_problems", 1)
-        correct = eval_dict.get("correct_count", 0)
         max_score = hw_dict.get("max_score", 10)
-        percentage = correct / total if total > 0 else 0
-        score = round(percentage * max_score, 1)
+        score, percentage, graded_total = _score_homework_result(eval_dict, max_score)
+        uncertain_count = int(_as_float(eval_dict.get("uncertain_count"), 0))
+        review_status = "needs_review" if uncertain_count > 0 else "none"
         
         submission = {
             "homework_id": homework_id,
@@ -883,10 +1064,14 @@ async def submit_homework(
             "attempt_number": attempt_number,
             "score": score,
             "max_score": max_score,
-            "percentage": percentage * 100,
+            "percentage": percentage,
             "grading_result": eval_dict,
+            "graded_problem_count": graded_total,
+            "pending_review_count": uncertain_count,
+            "review_status": review_status,
+            "student_image_url": student_image_url,
             "submitted_at": datetime.utcnow(),
-            "status": "graded"
+            "status": "needs_review" if uncertain_count > 0 else "graded"
         }
         
         sub_ref = db.collection("submissions").document()
