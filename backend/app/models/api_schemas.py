@@ -38,9 +38,13 @@ class HomeworkDraftRequest(BaseModel):
     title: str
     description: Optional[str] = None
     subject: SubjectType
+    class_id: Optional[str] = None
 
 class HomeworkApproveKeyRequest(BaseModel):
     approved_answer_key: dict
+
+class HomeworkPublishRequest(BaseModel):
+    class_id: Optional[str] = None
 
 class HomeworkUpdateRequest(BaseModel):
     max_score: Optional[int] = None

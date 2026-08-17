@@ -15,7 +15,7 @@ services:
       - key: GEMINI_TIMEOUT_SECONDS
         value: "60"
       - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
+        value: openai/gpt-oss-120b
       - key: GROQ_TIMEOUT_SECONDS
         value: "45"
       - key: ENABLE_BOT_POLLING

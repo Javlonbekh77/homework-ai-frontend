@@ -11,7 +11,9 @@ function normalizeApiBaseUrl(url: string) {
 
 async function parseError(res: Response, fallback: string) {
   const data = await res.json().catch(() => null);
-  return data?.detail || fallback;
+  if (!data?.detail) return fallback;
+  if (typeof data.detail === "string") return data.detail;
+  return JSON.stringify(data.detail);
 }
 
 export async function authWithTelegram(initData: string) {
@@ -96,10 +98,10 @@ export async function searchClassByCode(userId: string, joinCode: string) {
 // ----------------- HOMEWORKS -----------------
 
 export async function createHomework(userId: string, classId: string, title: string, description: string, subject: string) {
-  const res = await fetch(`${BASE_URL}/classes/${classId}/homeworks`, {
+  const res = await fetch(`${BASE_URL}/homeworks`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-user-id": userId },
-    body: JSON.stringify({ title, description, subject })
+    body: JSON.stringify({ title, description, subject, class_id: classId })
   });
   if (!res.ok) throw new Error("Failed to create homework");
   return res.json();
@@ -150,10 +152,11 @@ export async function updateHomework(userId: string, homeworkId: string, updates
   return res.json();
 }
 
-export async function publishHomework(userId: string, homeworkId: string) {
+export async function publishHomework(userId: string, homeworkId: string, classId?: string) {
   const res = await fetch(`${BASE_URL}/homeworks/${homeworkId}/publish`, {
     method: "POST",
-    headers: { "x-user-id": userId }
+    headers: { "Content-Type": "application/json", "x-user-id": userId },
+    body: JSON.stringify({ class_id: classId })
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

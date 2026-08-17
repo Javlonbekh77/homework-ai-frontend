@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_GROQ_TIMEOUT_SECONDS = 45
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -67,7 +67,7 @@ def _chat_completion_sync(
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="ignore")
         logger.error("Groq API HTTP error %s: %s", exc.code, error_body)
-        raise GroqAIError(f"Groq API error {exc.code}") from exc
+        raise GroqAIError(f"Groq API error {exc.code}: {_extract_error_message(error_body)}") from exc
     except urllib.error.URLError as exc:
         logger.error("Groq API connection error: %s", exc)
         raise GroqAIError("Groq API connection error") from exc
@@ -87,6 +87,19 @@ def _chat_completion_sync(
 def _get_model_name() -> str:
     configured_model = os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL).strip()
     return configured_model or DEFAULT_GROQ_MODEL
+
+
+def _extract_error_message(raw_body: str) -> str:
+    if not raw_body:
+        return "empty error body"
+    try:
+        payload = json.loads(raw_body)
+        error = payload.get("error", {})
+        if isinstance(error, dict):
+            return str(error.get("message") or error.get("code") or raw_body[:300])
+        return str(error or raw_body[:300])
+    except json.JSONDecodeError:
+        return raw_body[:300]
 
 
 def _get_timeout_seconds() -> int:

@@ -114,6 +114,7 @@ type AnswerProblem = {
   problem_number?: string;
   problem_text?: string;
   correct_answer?: string;
+  solution_steps?: string[];
   confidence?: number;
 };
 
@@ -126,10 +127,13 @@ type AnswerKey = {
 type Homework = {
   id: string;
   class_id?: string;
+  target_class_id?: string | null;
+  target_class_name?: string | null;
   title: string;
   description?: string | null;
   subject: string;
   status?: string;
+  workflow_status?: string;
   max_score?: number;
   answer_key_approved?: boolean;
   ai_generated_answer_key?: AnswerKey;
@@ -300,6 +304,9 @@ function getErrorMessage(error: unknown) {
 function statusLabel(status?: string) {
   if (status === "published") return "Nashr qilingan";
   if (status === "graded") return "Tekshirildi";
+  if (status === "approved") return "Tasdiqlangan";
+  if (status === "analyzed") return "AI tahlil qildi";
+  if (status === "draft_created") return "Qoralama ochildi";
   if (status === "draft") return "Qoralama";
   return status || "Yangi";
 }
@@ -307,7 +314,10 @@ function statusLabel(status?: string) {
 function statusBadge(status?: string) {
   if (status === "published") return "badge-green";
   if (status === "graded") return "badge-green";
+  if (status === "approved") return "badge-blue";
+  if (status === "analyzed") return "badge-blue";
   if (status === "draft") return "badge-orange";
+  if (status === "draft_created") return "badge-orange";
   return "badge-gray";
 }
 
@@ -467,6 +477,8 @@ export default function App() {
   const [classSubTab, setClassSubTab] = useState<"students" | "homeworks" | "grades">("students");
   const [allTeacherHomeworks, setAllTeacherHomeworks] = useState<Homework[]>([]);
   const [expandedAnswerKeys, setExpandedAnswerKeys] = useState<string[]>([]);
+  const [publishClassByHomework, setPublishClassByHomework] = useState<Record<string, string>>({});
+  const [answerKeyDrafts, setAnswerKeyDrafts] = useState<Record<string, AnswerKey>>({});
 
   // Question Bank States
   const [qbQuestions, setQbQuestions] = useState<any[]>([]);
@@ -1548,12 +1560,15 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      await analyzeHomeworkSource(user.id, homeworkId, sourceFile, problemRange.trim());
+      const analysis = await analyzeHomeworkSource(user.id, homeworkId, sourceFile, problemRange.trim());
+      if (analysis?.ai_generated_answer_key) {
+        setAnswerKeyDrafts((prev) => ({ ...prev, [homeworkId]: analysis.ai_generated_answer_key }));
+      }
       setNotice("Rasm tahlil qilindi.");
       setSourceFile(null);
 
       const activeHomework = allTeacherHomeworks.find(h => h.id === homeworkId);
-      const activeClassId = activeHomework?.class_id || selectedClassId || selectedTeacherClassId;
+      const activeClassId = activeHomework?.class_id || activeHomework?.target_class_id || selectedClassId || selectedTeacherClassId;
       if (activeClassId) {
         await loadTeacherHomeworks(user.id, activeClassId);
       }
@@ -1568,15 +1583,16 @@ export default function App() {
   }
 
   async function handleApprove(homework: Homework) {
-    if (!user || !homework.ai_generated_answer_key) return;
+    const finalAnswerKey = answerKeyDrafts[homework.id] || homework.ai_generated_answer_key;
+    if (!user || !finalAnswerKey) return;
     setBusyAction(`approve-${homework.id}`);
     setError("");
     setNotice("");
     try {
-      await approveAnswerKey(user.id, homework.id, homework.ai_generated_answer_key);
+      await approveAnswerKey(user.id, homework.id, finalAnswerKey);
       setNotice("Javob kaliti tasdiqlandi.");
 
-      const activeClassId = homework.class_id || selectedClassId || selectedTeacherClassId;
+      const activeClassId = homework.class_id || homework.target_class_id || selectedClassId || selectedTeacherClassId;
       if (activeClassId) {
         await loadTeacherHomeworks(user.id, activeClassId);
       }
@@ -1596,11 +1612,15 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      await publishHomework(user.id, homeworkId);
+      const activeHomework = allTeacherHomeworks.find(h => h.id === homeworkId) || homeworks.find(h => h.id === homeworkId);
+      const publishClassId = publishClassByHomework[homeworkId] || activeHomework?.class_id || activeHomework?.target_class_id || selectedClassId || selectedTeacherClassId;
+      if (!publishClassId) {
+        throw new Error("Publish qilishdan oldin sinfni tanlang");
+      }
+      await publishHomework(user.id, homeworkId, publishClassId);
       setNotice("Vazifa o'quvchilarga yuborildi.");
 
-      const activeHomework = allTeacherHomeworks.find(h => h.id === homeworkId);
-      const activeClassId = activeHomework?.class_id || selectedClassId || selectedTeacherClassId;
+      const activeClassId = publishClassId;
       if (activeClassId) {
         await loadTeacherHomeworks(user.id, activeClassId);
       }
@@ -2758,19 +2778,34 @@ export default function App() {
   }
 
   function renderTeacherHomework(homework: Homework) {
-    const answerKey = homework.ai_generated_answer_key || homework.approved_answer_key;
+    const answerKey = answerKeyDrafts[homework.id] || homework.ai_generated_answer_key || homework.approved_answer_key;
     const problems = answerKey?.problems ?? [];
     const isActive = activeHomeworkId === homework.id;
     const showingSubmissions = teacherSubmissionHomeworkId === homework.id;
+    const selectedPublishClassId = publishClassByHomework[homework.id] || homework.class_id || homework.target_class_id || selectedClassId || selectedTeacherClassId || classes[0]?.id || "";
+    const updateDraftProblem = (problemIndex: number, field: keyof AnswerProblem, value: string) => {
+      const baseKey = answerKey || { image_quality: "medium", general_notes: "", problems: [] };
+      const nextProblems = [...(baseKey.problems || [])];
+      nextProblems[problemIndex] = { ...(nextProblems[problemIndex] || {}), [field]: value };
+      setAnswerKeyDrafts((prev) => ({
+        ...prev,
+        [homework.id]: { ...baseKey, problems: nextProblems },
+      }));
+    };
 
     return (
       <article className="card homework-card" key={homework.id}>
         <div className="card-head">
           <div>
             <h3>{homework.title}</h3>
-            <p>{homework.description || homework.subject}</p>
+            <p>
+              {homework.description || homework.subject}
+              {homework.target_class_name && !homework.class_id ? ` - ${homework.target_class_name} uchun draft` : ""}
+            </p>
           </div>
-          <span className={`badge ${statusBadge(homework.status)}`}>{statusLabel(homework.status)}</span>
+          <span className={`badge ${statusBadge(homework.workflow_status || homework.status)}`}>
+            {statusLabel(homework.workflow_status || homework.status)}
+          </span>
         </div>
 
         <div className="action-row">
@@ -2861,8 +2896,8 @@ export default function App() {
                       className="problem-row"
                       key={`${problem.problem_number || index}`}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
+                        display: "grid",
+                        gridTemplateColumns: "64px 1fr",
                         gap: "8px",
                         padding: "8px 12px",
                         background: "var(--background)",
@@ -2870,30 +2905,77 @@ export default function App() {
                         border: "1px solid var(--border)"
                       }}
                     >
-                      <span style={{
-                        background: "rgba(59, 130, 246, 0.1)",
-                        color: "var(--primary)",
-                        fontWeight: 800,
-                        fontSize: "0.8rem",
-                        width: "24px",
-                        height: "24px",
-                        borderRadius: "50%",
-                        display: "grid",
-                        placeItems: "center"
-                      }}>
-                        {problem.problem_number || index + 1}
-                      </span>
-                      <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-main)", flex: 1 }}>
-                        {problem.correct_answer || problem.problem_text || "Javob topildi"}
-                      </p>
+                      <input
+                        className="input-field"
+                        value={problem.problem_number || ""}
+                        onChange={(event) => updateDraftProblem(index, "problem_number", event.target.value)}
+                        placeholder={`${index + 1}`}
+                        disabled={homework.answer_key_approved}
+                        style={{ padding: "8px", textAlign: "center", fontWeight: 800, color: "var(--primary)" }}
+                      />
+                      <div style={{ display: "grid", gap: "6px" }}>
+                        <input
+                          className="input-field"
+                          value={problem.problem_text || ""}
+                          onChange={(event) => updateDraftProblem(index, "problem_text", event.target.value)}
+                          placeholder="Masala matni"
+                          disabled={homework.answer_key_approved}
+                          style={{ padding: "8px", fontSize: "0.82rem" }}
+                        />
+                        <input
+                          className="input-field"
+                          value={problem.correct_answer || ""}
+                          onChange={(event) => updateDraftProblem(index, "correct_answer", event.target.value)}
+                          placeholder="To'g'ri javob"
+                          disabled={homework.answer_key_approved}
+                          style={{ padding: "8px", fontSize: "0.82rem", fontWeight: 800 }}
+                        />
+                      </div>
                     </div>
                   ))}
                 </div>
+                {!homework.answer_key_approved ? (
+                  <button
+                    className="btn btn-outline"
+                    type="button"
+                    disabled={!answerKey}
+                    onClick={() => {
+                      const baseKey = answerKey || { image_quality: "medium", general_notes: "", problems: [] };
+                      setAnswerKeyDrafts((prev) => ({
+                        ...prev,
+                        [homework.id]: {
+                          ...baseKey,
+                          problems: [
+                            ...(baseKey.problems || []),
+                            { problem_number: `${(baseKey.problems || []).length + 1}`, problem_text: "", correct_answer: "", confidence: 1 },
+                          ],
+                        },
+                      }));
+                    }}
+                    style={{ width: "100%", marginBottom: "10px" }}
+                  >
+                    <Plus size={16} /> Masala qo'shish
+                  </button>
+                ) : null}
+                <label className="input-group" style={{ marginBottom: "10px" }}>
+                  <span className="input-label">Sinfga biriktirish</span>
+                  <select
+                    className="input-field"
+                    value={selectedPublishClassId}
+                    onChange={(event) => setPublishClassByHomework((prev) => ({ ...prev, [homework.id]: event.target.value }))}
+                    disabled={homework.status === "published"}
+                  >
+                    <option value="">Sinf tanlang</option>
+                    {classes.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name} - {item.subject}</option>
+                    ))}
+                  </select>
+                </label>
                 <div className="action-row">
                   <button
                     className="btn btn-secondary"
                     type="button"
-                    disabled={isBusy || homework.answer_key_approved || !homework.ai_generated_answer_key}
+                    disabled={isBusy || homework.answer_key_approved || !answerKey}
                     onClick={() => void handleApprove(homework)}
                   >
                     <Check size={17} />
@@ -2902,7 +2984,7 @@ export default function App() {
                   <button
                     className="btn btn-primary"
                     type="button"
-                    disabled={isBusy || !homework.answer_key_approved || homework.status === "published"}
+                    disabled={isBusy || !homework.answer_key_approved || homework.status === "published" || !selectedPublishClassId}
                     onClick={() => void handlePublish(homework.id)}
                   >
                     <Send size={17} />
@@ -6046,12 +6128,13 @@ export default function App() {
           }
         ]);
       } catch (caught) {
-        setError(getErrorMessage(caught));
+        const tutorError = getErrorMessage(caught);
+        setError(tutorError);
         setStudentTutorChat(prev => [
           ...prev,
           {
             sender: "ai" as const,
-            text: "AI tutor hozir javob bera olmadi. Groq API kaliti yoki backend ulanishini tekshirib ko'ring.",
+            text: `AI tutor hozir javob bera olmadi: ${tutorError}. Backend ishlayotganini va GROQ_API_KEY kiritilganini tekshiring.`,
             time: "Hozir"
           }
         ]);

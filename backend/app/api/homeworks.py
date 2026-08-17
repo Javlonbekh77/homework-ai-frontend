@@ -7,7 +7,7 @@ import json
 
 from ..services.firebase_service import get_db
 from ..services.gemini_service import extract_book_problems, evaluate_homework
-from ..models.api_schemas import HomeworkDraftRequest, HomeworkApproveKeyRequest, HomeworkUpdateRequest
+from ..models.api_schemas import HomeworkDraftRequest, HomeworkApproveKeyRequest, HomeworkPublishRequest, HomeworkUpdateRequest
 from .users import get_current_user
 
 router = APIRouter()
@@ -76,39 +76,64 @@ def _latest_at(rows):
 
 # ----------------- TEACHER ENDPOINTS -----------------
 
-@router.post("/classes/{class_id}/homeworks")
-async def create_homework(class_id: str, req: HomeworkDraftRequest, current_user: dict = Depends(get_current_user)):
+def _verify_teacher_class(db, class_id: str, teacher_id: str):
+    cls = db.collection("classes").document(class_id).get()
+    if not cls.exists or cls.to_dict().get("teacher_id") != teacher_id:
+        raise HTTPException(status_code=403, detail="You do not own this class")
+    return cls.to_dict()
+
+
+def _homework_response(doc_id: str, data: dict) -> dict:
+    return {"id": doc_id, **data}
+
+
+@router.post("/homeworks")
+async def create_homework_draft(req: HomeworkDraftRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "teacher":
         raise HTTPException(status_code=403, detail="Only teachers can create homeworks")
-        
+
     db = get_db()
-    # verify class ownership
-    cls = db.collection("classes").document(class_id).get()
-    if not cls.exists or cls.to_dict().get("teacher_id") != current_user["id"]:
-        raise HTTPException(status_code=403, detail="You do not own this class")
-        
+    target_class = None
+    if req.class_id:
+        target_class = _verify_teacher_class(db, req.class_id, current_user["id"])
+
     homework_data = {
-        "class_id": class_id,
+        "class_id": None,
+        "target_class_id": req.class_id,
+        "target_class_name": target_class.get("name") if target_class else None,
         "teacher_id": current_user["id"],
         "title": req.title,
         "description": req.description,
-        "subject": req.subject,
+        "subject": target_class.get("subject") if target_class else req.subject,
         "status": "draft",
+        "workflow_status": "draft_created",
         "created_at": datetime.utcnow(),
         "max_score": 10,
         "allow_resubmission": True,
         "answer_key_approved": False
     }
-    
+
     doc_ref = db.collection("homeworks").document()
     doc_ref.set(homework_data)
-    return {"id": doc_ref.id, **homework_data}
+    return _homework_response(doc_ref.id, homework_data)
+
+
+@router.post("/classes/{class_id}/homeworks")
+async def create_homework(class_id: str, req: HomeworkDraftRequest, current_user: dict = Depends(get_current_user)):
+    req.class_id = class_id
+    return await create_homework_draft(req, current_user)
 
 @router.get("/classes/{class_id}/homeworks")
 async def list_class_homeworks(class_id: str, current_user: dict = Depends(get_current_user)):
     db = get_db()
-    hw_docs = db.collection("homeworks").where("class_id", "==", class_id).stream()
-    hw_list = [{"id": h.id, **h.to_dict()} for h in hw_docs]
+    if current_user.get("role") == "teacher":
+        _verify_teacher_class(db, class_id, current_user["id"])
+
+    assigned_docs = list(db.collection("homeworks").where("class_id", "==", class_id).stream())
+    target_docs = list(db.collection("homeworks").where("target_class_id", "==", class_id).stream())
+    docs_by_id = {doc.id: doc for doc in [*assigned_docs, *target_docs]}
+    hw_list = [_homework_response(h.id, h.to_dict()) for h in docs_by_id.values()]
+    hw_list.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
     return hw_list
 
 @router.get("/teacher/homeworks")
@@ -118,7 +143,9 @@ async def list_teacher_homeworks(current_user: dict = Depends(get_current_user))
         
     db = get_db()
     hw_docs = db.collection("homeworks").where("teacher_id", "==", current_user["id"]).stream()
-    return [{"id": h.id, **h.to_dict()} for h in hw_docs]
+    homeworks = [_homework_response(h.id, h.to_dict()) for h in hw_docs]
+    homeworks.sort(key=lambda item: _date_key(item.get("created_at")), reverse=True)
+    return homeworks
 
 
 @router.get("/teacher/dashboard")
@@ -176,10 +203,13 @@ async def get_teacher_dashboard(current_user: dict = Depends(get_current_user)):
         homework_map[doc.id] = {
             "id": doc.id,
             "class_id": class_id,
+            "target_class_id": data.get("target_class_id"),
+            "target_class_name": data.get("target_class_name"),
             "title": data.get("title") or "Nomsiz vazifa",
             "description": data.get("description"),
             "subject": data.get("subject") or class_map.get(class_id, {}).get("subject") or "Noma'lum fan",
             "status": data.get("status") or "draft",
+            "workflow_status": data.get("workflow_status"),
             "max_score": data.get("max_score", 10),
             "created_at": data.get("created_at"),
             "published_at": data.get("published_at"),
@@ -317,7 +347,7 @@ async def get_teacher_dashboard(current_user: dict = Depends(get_current_user)):
 
         homework_stats.append({
             **homework,
-            "class_name": class_data.get("name") or "Noma'lum sinf",
+            "class_name": class_data.get("name") or homework.get("target_class_name") or "Biriktirilmagan",
             "student_count": student_count,
             "submission_count": len(homework_attempts),
             "submitted_student_count": len(submitted_students),
@@ -419,7 +449,8 @@ async def analyze_homework_source(
         hw_ref.update({
             "selected_problem_range": problem_range,
             "ai_generated_answer_key": ai_key,
-            "answer_key_approved": False
+            "answer_key_approved": False,
+            "workflow_status": "analyzed"
         })
         return {"status": "success", "ai_generated_answer_key": ai_key}
     except Exception as e:
@@ -441,7 +472,8 @@ async def approve_answer_key(homework_id: str, req: HomeworkApproveKeyRequest, c
         
     hw_ref.update({
         "approved_answer_key": req.approved_answer_key,
-        "answer_key_approved": True
+        "answer_key_approved": True,
+        "workflow_status": "approved"
     })
     return {"status": "success"}
 
@@ -462,7 +494,7 @@ async def update_homework(homework_id: str, req: HomeworkUpdateRequest, current_
     return {"status": "success"}
 
 @router.post("/homeworks/{homework_id}/publish")
-async def publish_homework(homework_id: str, current_user: dict = Depends(get_current_user)):
+async def publish_homework(homework_id: str, req: Optional[HomeworkPublishRequest] = None, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "teacher":
         raise HTTPException(status_code=403, detail="Access denied")
         
@@ -475,9 +507,19 @@ async def publish_homework(homework_id: str, current_user: dict = Depends(get_cu
     hw_dict = hw.to_dict()
     if not hw_dict.get("answer_key_approved"):
         raise HTTPException(status_code=400, detail="Cannot publish without approved answer key")
-        
+
+    publish_class_id = (req.class_id if req else None) or hw_dict.get("class_id") or hw_dict.get("target_class_id")
+    if not publish_class_id:
+        raise HTTPException(status_code=400, detail="Publish qilishdan oldin sinfni tanlang")
+    target_class = _verify_teacher_class(db, publish_class_id, current_user["id"])
+
     hw_ref.update({
+        "class_id": publish_class_id,
+        "target_class_id": publish_class_id,
+        "target_class_name": target_class.get("name"),
+        "subject": target_class.get("subject") or hw_dict.get("subject"),
         "status": "published",
+        "workflow_status": "published",
         "published_at": datetime.utcnow()
     })
     return {"status": "success"}
