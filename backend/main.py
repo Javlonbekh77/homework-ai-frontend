@@ -14,7 +14,7 @@ from app.services.firebase_service import (
     init_firebase,
     is_firebase_ready,
 )
-from app.api import auth, classes, users, homeworks
+from app.api import auth, checkers, classes, homeworks, math_learning, tutor, users
 from app.bot.handlers import BOT_HANDLER_VERSION, router as bot_router
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
@@ -75,6 +75,9 @@ app.include_router(auth.router, prefix="/api/auth")
 app.include_router(classes.router, prefix="/api/classes")
 app.include_router(users.router, prefix="/api/users")
 app.include_router(homeworks.router, prefix="/api")
+app.include_router(math_learning.router, prefix="/api")
+app.include_router(checkers.router, prefix="/api")
+app.include_router(tutor.router, prefix="/api")
 
 
 @app.get("/health")
@@ -90,6 +93,7 @@ async def health_check():
             "has_telegram_bot_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
             "has_telegram_web_app_url": bool(os.getenv("TELEGRAM_WEB_APP_URL")),
             "has_gemini_api_key": bool(os.getenv("GEMINI_API_KEY")),
+            "has_groq_api_key": bool(os.getenv("GROQ_API_KEY")),
             "enable_bot_polling": env_flag("ENABLE_BOT_POLLING", True),
         },
     }

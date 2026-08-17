@@ -17,6 +17,9 @@ TELEGRAM_WEB_APP_URL=https://your-frontend-domain.vercel.app
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-3.6-flash
 GEMINI_TIMEOUT_SECONDS=60
+GROQ_API_KEY=your_groq_api_key
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_TIMEOUT_SECONDS=45
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"..."}
 ENABLE_BOT_POLLING=true
 ```

@@ -12,11 +12,23 @@ from pydantic import BaseModel, ValidationError
 
 from .prompts import (
     BOOK_EXTRACTION_PROMPT,
+    CONTROL_WORK_EVALUATION_PROMPT,
+    DIKTANT_EVALUATION_PROMPT,
     HOMEWORK_EVALUATION_PROMPT,
+    TEST_ANSWER_EXTRACTION_PROMPT,
     build_book_extraction_task,
+    build_control_work_evaluation_task,
+    build_diktant_evaluation_task,
     build_homework_evaluation_task,
+    build_test_answer_extraction_task,
 )
-from .schemas import BookExtractionResult, HomeworkEvaluationResult
+from .schemas import (
+    BookExtractionResult,
+    ControlWorkEvaluationResult,
+    DiktantEvaluationResult,
+    HomeworkEvaluationResult,
+    TestAnswerExtractionResult,
+)
 
 DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_TIMEOUT_SECONDS = 60
@@ -68,6 +80,57 @@ async def evaluate_homework(
         system_instruction=HOMEWORK_EVALUATION_PROMPT,
         user_task=task,
         schema=HomeworkEvaluationResult,
+    )
+
+
+async def evaluate_diktant(
+    image_path: str,
+    original_text: str,
+) -> DiktantEvaluationResult:
+    logging.info("Gemini diktant evaluation started")
+    task = build_diktant_evaluation_task(original_text)
+    return await _call_gemini_json(
+        image_path=image_path,
+        system_instruction=DIKTANT_EVALUATION_PROMPT,
+        user_task=task,
+        schema=DiktantEvaluationResult,
+    )
+
+
+async def extract_test_answers(
+    image_path: str,
+    question_count: int,
+) -> TestAnswerExtractionResult:
+    logging.info("Gemini test answer extraction started")
+    task = build_test_answer_extraction_task(question_count)
+    return await _call_gemini_json(
+        image_path=image_path,
+        system_instruction=TEST_ANSWER_EXTRACTION_PROMPT,
+        user_task=task,
+        schema=TestAnswerExtractionResult,
+    )
+
+
+async def evaluate_control_work(
+    image_path: str,
+    *,
+    title: str,
+    subject: str,
+    criteria_text: str = "",
+    answer_key_json: str = "",
+) -> ControlWorkEvaluationResult:
+    logging.info("Gemini control work evaluation started")
+    task = build_control_work_evaluation_task(
+        title=title,
+        subject=subject,
+        criteria_text=criteria_text,
+        answer_key_json=answer_key_json,
+    )
+    return await _call_gemini_json(
+        image_path=image_path,
+        system_instruction=CONTROL_WORK_EVALUATION_PROMPT,
+        user_task=task,
+        schema=ControlWorkEvaluationResult,
     )
 
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import {
   Home,
   TrendingUp,
@@ -10,22 +10,36 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  ChevronRight,
   ClipboardList,
   Copy,
   FileCheck,
+  FileText,
   Flame,
   GraduationCap,
+  Image as ImageIcon,
   Plus,
   RefreshCcw,
   School,
   Search,
   Send,
+  Settings,
   Star,
   Trophy,
   Upload,
   UserPlus,
   UserRound,
   UsersRound,
+  Edit,
+  Sliders,
+  X,
+  MessageCircle,
+  BookType,
+  Wrench,
+  PenTool,
+  CheckCircle,
+  Clock,
+  Bell,
 } from "lucide-react";
 import "./App.css";
 import {
@@ -43,11 +57,28 @@ import {
   publishHomework,
   searchClassByCode,
   submitHomework,
+  updateProfile,
   updateRole,
   getClassStudents,
   getTeacherDashboard,
   getTeacherHomeworks,
+  getGrades,
+  getTopics,
+  getSkills,
+  getQuestionBank,
+  updateQuestion,
+  updateQuestionStatus,
+  extractQuestions,
+  generateVariant,
+  createTopic,
+  checkControlWork,
+  checkDiktant,
+  checkTestManual,
+  checkTestScan,
+  sendTutorMessage,
 } from "./services/api";
+
+
 
 type Role = "teacher" | "student";
 
@@ -257,7 +288,10 @@ declare global {
 }
 
 const isLocalhost =
-  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  import.meta.env.DEV || 
+  window.location.hostname === "localhost" || 
+  window.location.hostname === "127.0.0.1" || 
+  window.location.hostname.startsWith("192.168.");
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Noma'lum xatolik yuz berdi";
@@ -292,20 +326,8 @@ function scoreText(submission: Submission) {
   return `${submission.score}/${maxScore}`;
 }
 
-function metricNumber(value?: number) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "0";
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
 function metricPercent(value?: number) {
   return `${Math.round(value ?? 0)}%`;
-}
-
-function shortDate(value?: string | null) {
-  if (!value) return "Hali yo'q";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Hali yo'q";
-  return date.toLocaleDateString("uz-UZ", { day: "2-digit", month: "short" });
 }
 
 function submissionRank(submission: Submission) {
@@ -416,6 +438,8 @@ export default function App() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [profileEditing, setProfileEditing] = useState(false);
+  const [profileDraft, setProfileDraft] = useState({ full_name: "" });
 
   const [classForm, setClassForm] = useState({ name: "", subject: "Matematika" });
   const [homeworkForm, setHomeworkForm] = useState({
@@ -435,10 +459,7 @@ export default function App() {
   const [teacherSubmissions, setTeacherSubmissions] = useState<Submission[]>([]);
   const [teacherDashboard, setTeacherDashboard] = useState<TeacherDashboard | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
-  const [dashboardClassId, setDashboardClassId] = useState("");
-  const [dashboardSubject, setDashboardSubject] = useState("");
-  const [dashboardStudentId, setDashboardStudentId] = useState("");
-  
+
   // Teacher Class Detail States
   const [selectedTeacherClassId, setSelectedTeacherClassId] = useState("");
   const [classStudents, setClassStudents] = useState<any[]>([]);
@@ -447,12 +468,493 @@ export default function App() {
   const [allTeacherHomeworks, setAllTeacherHomeworks] = useState<Homework[]>([]);
   const [expandedAnswerKeys, setExpandedAnswerKeys] = useState<string[]>([]);
 
+  // Question Bank States
+  const [qbQuestions, setQbQuestions] = useState<any[]>([]);
+  const [qbLoading, setQbLoading] = useState(false);
+  const [qbGradesList, setQbGradesList] = useState<any[]>([]);
+  const [qbTopicsList, setQbTopicsList] = useState<any[]>([]);
+  const [qbSkillsList, setQbSkillsList] = useState<any[]>([]);
+
+  // Wizard States
+  const [qbWizardOpen, setQbWizardOpen] = useState(false);
+  const qbSubject = "mathematics";
+  const [qbGrade, setQbGrade] = useState<number | "">("");
+  const [qbTopicId, setQbTopicId] = useState("");
+  const [customTopicName, setCustomTopicName] = useState("");
+  const [showCustomTopicInput, setShowCustomTopicInput] = useState(false);
+  const [qbSelectedSkills, setQbSelectedSkills] = useState<string[]>([]);
+  const [qbTextContent, setQbTextContent] = useState("");
+  const [qbFile, setQbFile] = useState<File | null>(null);
+  const [qbExtracting, setQbExtracting] = useState(false);
+  const [qbExtractedResult, setQbExtractedResult] = useState<any[]>([]);
+
+  // Filter States
+  const [qbFilterGrade, setQbFilterGrade] = useState<number | "">("");
+  const [qbFilterTopicId, setQbFilterTopicId] = useState("");
+  const [qbFilterSkillId, setQbFilterSkillId] = useState("");
+  const [qbFilterStatus, setQbFilterStatus] = useState("");
+
+  // Edit / Preview States
+  const [qbEditingQuestion, setQbEditingQuestion] = useState<any | null>(null);
+  const [qbTestingVariantId, setQbTestingVariantId] = useState("");
+  const [qbVariantParams, setQbVariantParams] = useState<Record<string, any>>({});
+  const [qbVariantResult, setQbVariantResult] = useState<any | null>(null);
+
+  // Tools Flow States
+  const [toolsActiveView, setToolsActiveView] = useState<"home" | "question_bank" | "paper_checker" | "test_checker" | "diktant_checker" | "control_work">("home");
+
+  // Diktant Checker States
+  const [diktantStep, setDiktantStep] = useState(1);
+  const [diktantStudent, setDiktantStudent] = useState("");
+  const [diktantText, setDiktantText] = useState("");
+  const [diktantImage, setDiktantImage] = useState<File | null>(null);
+  const [diktantResult, setDiktantResult] = useState<any>(null);
+
+  // Test Checker States
+  const [testStep, setTestStep] = useState(1);
+  const [testStudent, setTestStudent] = useState("");
+  const [testAnswers, setTestAnswers] = useState<Record<number, string>>({});
+  const [testResult, setTestResult] = useState<any>(null);
+  const [testName, setTestName] = useState("Algebra Test #3");
+  const [testClass, setTestClass] = useState("8-A");
+  const [testQuestionCount, setTestQuestionCount] = useState(20);
+  const [testMaxScore, setTestMaxScore] = useState(20);
+  const [testStudentAnswers, setTestStudentAnswers] = useState<Record<number, string>>({});
+  const [testKeySaved, setTestKeySaved] = useState<Record<number, string>>({});
+  const [testImage, setTestImage] = useState<File | null>(null);
+
+  // Control Work States
+  const [cwStep, setCwStep] = useState(1);
+  const [cwStudent, setCwStudent] = useState("");
+  const [cwImage, setCwImage] = useState<File | null>(null);
+  const [cwResult, setCwResult] = useState<any>(null);
+  const [cwName, setCwName] = useState("Kvadrat tenglamalar nazorat ishi");
+  const [cwClass, setCwClass] = useState("8-A");
+  const [cwSubject, setCwSubject] = useState("Matematika");
+  const [cwMaxScore, setCwMaxScore] = useState(10);
+  // Teacher custom states
+  const [showCreateClassForm, setShowCreateClassForm] = useState(false);
+
+  // Student workflow states
+  const [studentSelectedHomeworkId, setStudentSelectedHomeworkId] = useState<string | null>(null);
+  const [studentUploadStep, setStudentUploadStep] = useState<"detail" | "upload" | "loading" | "result">("detail");
+  const [studentPracticeStep, setStudentPracticeStep] = useState<"list" | "question" | "complete">("list");
+  const [studentPracticeAnswers, setStudentPracticeAnswers] = useState<Record<number, string>>({});
+  const [studentPracticeInput, setStudentPracticeInput] = useState("-0.5");
+  const [studentStreak, setStudentStreak] = useState(12);
+  const [studentXP, setStudentXP] = useState(1240);
+  const [studentUploadImage, setStudentUploadImage] = useState<string | null>("https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=80&w=300");
+  const [studentProgressPercent, setStudentProgressPercent] = useState(68);
+  const [studentTutorInput, setStudentTutorInput] = useState("");
+  const [studentTutorChat, setStudentTutorChat] = useState<Array<{ sender: "user" | "ai"; text: string; time?: string; isSpecialBlock?: boolean }>>([
+    { sender: "ai", text: "Salom, Malika! Keling, bu savolda qayerda xato bo'lganini birga ko'rib chiqamiz." }
+  ]);
+  // Teacher journal drill-down state
+  const [selectedJournalStudentId, setSelectedJournalStudentId] = useState<string | null>(null);
+  const [teacherStudentSearch, setTeacherStudentSearch] = useState("");
+  const [selectedClassStudentId, setSelectedClassStudentId] = useState<string | null>(null);
+
+  const loadGradesList = useCallback(async (userId: string) => {
+    try {
+      const data = await getGrades(userId);
+      setQbGradesList(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  const loadTopicsList = useCallback(async (userId: string, grade?: number) => {
+    try {
+      const data = await getTopics(userId, grade);
+      setQbTopicsList(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  const loadSkillsList = useCallback(async (userId: string, topicId: string) => {
+    try {
+      const data = await getSkills(userId, topicId);
+      setQbSkillsList(data);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
+  const loadQuestionBankQuestions = useCallback(async (userId: string) => {
+    setQbLoading(true);
+    try {
+      const filters: any = {};
+      if (qbFilterGrade !== "") filters.grade = Number(qbFilterGrade);
+      if (qbFilterTopicId) filters.topic_id = qbFilterTopicId;
+      if (qbFilterSkillId) filters.skill_id = qbFilterSkillId;
+      if (qbFilterStatus) filters.status = qbFilterStatus;
+      filters.subject_id = "mathematics";
+
+      const data = await getQuestionBank(userId, filters);
+      setQbQuestions(data);
+    } catch (err) {
+      if (isLocalhost) {
+        console.warn("loadQuestionBankQuestions failed: using local mock questions", err);
+      } else {
+        setError(getErrorMessage(err));
+      }
+    } finally {
+      setQbLoading(false);
+    }
+  }, [qbFilterGrade, qbFilterTopicId, qbFilterSkillId, qbFilterStatus]);
+
   const selectedClass = useMemo(
+
     () => classes.find((item) => item.id === selectedClassId),
     [classes, selectedClassId],
   );
 
   const isBusy = busyAction !== null;
+
+  const subjectMeta: Record<string, { bg: string; color: string; icon: ReactNode }> = {
+    "Matematika": { bg: "rgba(59,130,246,0.1)", color: "var(--primary)", icon: <BookOpen size={18} /> },
+    "Fizika": { bg: "rgba(139,92,246,0.1)", color: "#8b5cf6", icon: <TrendingUp size={18} /> },
+    "Kimyo": { bg: "rgba(16,185,129,0.1)", color: "var(--secondary)", icon: <FileCheck size={18} /> },
+    "Ona tili": { bg: "rgba(245,158,11,0.1)", color: "var(--warning)", icon: <BookType size={18} /> },
+    "Ingliz tili": { bg: "rgba(239,68,68,0.1)", color: "var(--danger)", icon: <MessageCircle size={18} /> },
+    "Biologiya": { bg: "rgba(34,197,94,0.1)", color: "#16a34a", icon: <School size={18} /> },
+  };
+
+  function getSubjectMeta(subject = "Fan") {
+    return subjectMeta[subject] || { bg: "rgba(100,116,139,0.1)", color: "var(--text-muted)", icon: <BookOpen size={18} /> };
+  }
+
+  function groupHomeworksBySubject(items: Homework[]) {
+    return items.reduce<Record<string, Homework[]>>((groups, homework) => {
+      const subject = homework.subject || "Boshqa fan";
+      groups[subject] = [...(groups[subject] || []), homework];
+      return groups;
+    }, {});
+  }
+
+  function subjectGrowthRows() {
+    const rows = [
+      { subject: "Matematika", values: [68, 72, 75, 81, 84], teacherFeedback: "Diskriminant va ishoralarda e'tibor kuchaytirilsa, keyingi nazoratda yuqori natija kutiladi." },
+      { subject: "Fizika", values: [61, 65, 64, 70, 74], teacherFeedback: "Formulani tanlash yaxshi, lekin birliklarni yozish odatini mustahkamlash kerak." },
+      { subject: "Ona tili", values: [78, 80, 83, 82, 86], teacherFeedback: "Matnli javoblarda izohlar aniq. Imlo xatolari kamaymoqda." },
+    ];
+
+    const subjectScores = new Map<string, number[]>();
+    homeworks.forEach((homework) => {
+      if (typeof homework.latest_percentage !== "number") return;
+      const current = subjectScores.get(homework.subject) || [];
+      subjectScores.set(homework.subject, [...current, homework.latest_percentage]);
+    });
+
+    return rows.map((row) => {
+      const realScores = subjectScores.get(row.subject);
+      const values = realScores?.length ? [...row.values.slice(0, Math.max(0, 5 - realScores.length)), ...realScores].slice(-5) : row.values;
+      const average = Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+      const delta = values[values.length - 1] - values[0];
+      return { ...row, values, average, delta };
+    });
+  }
+
+  function renderLineGraph(values: number[], color: string) {
+    const width = 220;
+    const height = 72;
+    const padding = 8;
+    const min = Math.min(...values, 50);
+    const max = Math.max(...values, 100);
+    const range = Math.max(1, max - min);
+    const points = values.map((value, index) => {
+      const x = padding + (index * (width - padding * 2)) / Math.max(1, values.length - 1);
+      const y = height - padding - ((value - min) / range) * (height - padding * 2);
+      return { x, y, value };
+    });
+    const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+    const areaPath = `${path} L ${points[points.length - 1].x.toFixed(1)} ${height - padding} L ${points[0].x.toFixed(1)} ${height - padding} Z`;
+
+    return (
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="72" role="img" aria-label="O'sish grafigi">
+        <path d={areaPath} fill={color} opacity="0.1" />
+        <path d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((point, index) => (
+          <circle key={`${point.x}-${index}`} cx={point.x} cy={point.y} r="3.5" fill="white" stroke={color} strokeWidth="2" />
+        ))}
+      </svg>
+    );
+  }
+
+  function seedQuestionBankDemo() {
+    setQbGradesList([
+      { grade: 7 },
+      { grade: 8 },
+      { grade: 9 },
+    ]);
+    setQbTopicsList([
+      { id: "topic_quadratic", name: "Kvadrat tenglamalar", grade: 8 },
+      { id: "topic_linear", name: "Chiziqli tenglamalar", grade: 7 },
+    ]);
+    setQbQuestions([
+      {
+        id: "q1",
+        grade: 8,
+        topic_id: "topic_quadratic",
+        question_text: "x^2 - 5x + 6 = 0 tenglamani yeching.",
+        question_type: "numeric",
+        correct_answer: "2,3",
+        difficulty: 1,
+        status: "approved",
+        solution_steps: ["x^2 - 5x + 6 = (x-2)(x-3) = 0", "x1 = 2, x2 = 3"],
+        variant_allowed: true,
+        variant_template: { template_type: "quadratic_equation", parameters: { a: 1, b: -5, c: 6 } },
+      },
+      {
+        id: "q2",
+        grade: 7,
+        topic_id: "topic_linear",
+        question_text: "2x + 4 = 10 tenglamani yeching.",
+        question_type: "numeric",
+        correct_answer: "3",
+        difficulty: 1,
+        status: "draft",
+        solution_steps: ["2x = 6", "x = 3"],
+        variant_allowed: true,
+        variant_template: { template_type: "ax_plus_b_equals_c", parameters: { a: 2, b: 4, c: 10 } },
+      },
+    ]);
+  }
+
+  function seedLocalTeacherDashboard() {
+    const demoClasses: SchoolClass[] = [
+      { id: "class_8a", name: "8-A", subject: "Matematika", join_code: "M8A24", student_count: 28 },
+      { id: "class_8b", name: "8-B", subject: "Matematika", join_code: "M8B18", student_count: 27 },
+      { id: "class_7a", name: "7-A", subject: "Matematika", join_code: "M7A31", student_count: 26 },
+      { id: "class_7b", name: "7-B", subject: "Matematika", join_code: "M7B09", student_count: 25 },
+    ];
+    const demoHomeworks: Homework[] = [
+      {
+        id: "hw_quad",
+        class_id: "class_8a",
+        title: "Kvadrat tenglamalar",
+        subject: "Matematika",
+        description: "15-20 mashqlarni daftarda ishlab, rasmini yuboring.",
+        status: "published",
+        max_score: 5,
+        answer_key_approved: true,
+        deadline: "Bugun, 23:59",
+      },
+      {
+        id: "hw_poly",
+        class_id: "class_8a",
+        title: "Muntazam ko'pburchaklar",
+        subject: "Matematika",
+        description: "Ko'pburchak burchaklari bo'yicha mashqlar.",
+        status: "published",
+        max_score: 5,
+        answer_key_approved: true,
+        deadline: "22.05.2025",
+      },
+      {
+        id: "hw_stat",
+        class_id: "class_7a",
+        title: "Statistika asoslari",
+        subject: "Matematika",
+        description: "Diagramma va o'rtacha qiymatga oid savollar.",
+        status: "draft",
+        max_score: 5,
+        answer_key_approved: false,
+        deadline: "Qoralama",
+      },
+    ];
+
+    setClasses(demoClasses);
+    setSelectedClassId("class_8a");
+    setHomeworks(demoHomeworks.filter((homework) => homework.class_id === "class_8a"));
+    setAllTeacherHomeworks(demoHomeworks);
+    setClassStudents([
+      { id: "s1", full_name: "Saidov Asilbek", telegram_username: "asilbek", average_score: 92, submission_count: 14 },
+      { id: "s2", full_name: "Karimova Dilnoza", telegram_username: "dilnoza", average_score: 88, submission_count: 12 },
+      { id: "s3", full_name: "Yusupov Behruz", telegram_username: "behruz", average_score: 58, submission_count: 8 },
+    ]);
+    setTeacherDashboard({
+      generated_at: "2026-08-17T09:00:00+05:00",
+      summary: {
+        class_count: demoClasses.length,
+        subject_count: 1,
+        student_count: 106,
+        homework_count: 18,
+        published_homework_count: 12,
+        submission_count: 36,
+        submitted_student_count: 36,
+        average_score: 4.2,
+        average_percentage: 84,
+        coverage_percent: 86,
+      },
+      classes: demoClasses.map((item) => ({
+        id: item.id,
+        name: item.name,
+        subject: item.subject,
+        join_code: item.join_code,
+        student_count: item.student_count ?? 0,
+        homework_count: item.id === "class_8a" ? 2 : 1,
+        published_homework_count: item.id === "class_8a" ? 2 : 1,
+        submission_count: item.id === "class_8a" ? 24 : 12,
+        submitted_student_count: item.id === "class_8a" ? 24 : 12,
+        average_score: item.id === "class_7b" ? 3.6 : 4.2,
+        average_percentage: item.id === "class_7b" ? 72 : 84,
+        coverage_percent: item.id === "class_8a" ? 86 : 75,
+        last_submission_at: "2026-08-17T08:30:00+05:00",
+      })),
+      subjects: [
+        {
+          subject: "Matematika",
+          class_count: demoClasses.length,
+          student_count: 106,
+          homework_count: 18,
+          published_homework_count: 12,
+          submission_count: 36,
+          submitted_student_count: 36,
+          average_score: 4.2,
+          average_percentage: 84,
+          coverage_percent: 86,
+          last_submission_at: "2026-08-17T08:30:00+05:00",
+        },
+      ],
+      homeworks: demoHomeworks.map((homework) => ({
+        id: homework.id,
+        class_id: homework.class_id,
+        class_name: demoClasses.find((item) => item.id === homework.class_id)?.name || "Sinf",
+        title: homework.title,
+        subject: homework.subject,
+        status: homework.status,
+        student_count: homework.class_id === "class_8a" ? 28 : 26,
+        submission_count: homework.id === "hw_quad" ? 24 : 18,
+        submitted_student_count: homework.id === "hw_quad" ? 24 : 18,
+        average_score: homework.id === "hw_stat" ? 0 : 4.2,
+        average_percentage: homework.id === "hw_stat" ? 0 : 84,
+        coverage_percent: homework.id === "hw_quad" ? 86 : 69,
+        created_at: "2026-08-16T10:00:00+05:00",
+        last_submission_at: "2026-08-17T08:30:00+05:00",
+      })),
+      students: [
+        {
+          id: "s1",
+          full_name: "Saidov Asilbek",
+          telegram_username: "asilbek",
+          class_ids: ["class_8a"],
+          classes: [{ id: "class_8a", name: "8-A", subject: "Matematika" }],
+          assigned_homework_count: 12,
+          submitted_homework_count: 11,
+          submission_count: 14,
+          average_score: 4.6,
+          average_percentage: 92,
+          coverage_percent: 92,
+          last_submission_at: "2026-08-17T08:30:00+05:00",
+        },
+      ],
+      submissions: [],
+    });
+    setStudentSubmissionsByHomework({});
+    seedQuestionBankDemo();
+  }
+
+  function seedLocalStudentDashboard() {
+    const gradedSubmission: Submission = {
+      id: "student_sub_quad",
+      homework_title: "Chiziqli tenglamalar sistemasi",
+      class_name: "8-A",
+      subject: "Matematika",
+      attempt_number: 1,
+      score: 4.2,
+      max_score: 5,
+      percentage: 84,
+      status: "graded",
+      submitted_at: "2026-08-17T08:15:00+05:00",
+      grading_result: {
+        total_problems: 28,
+        correct_count: 21,
+        incorrect_count: 4,
+        missing_count: 0,
+        uncertain_count: 2,
+        general_feedback: "Umuman yaxshi ishlangan. Belgilar va hisoblashga e'tiborni kuchaytirsangiz, natija yanada yaxshilanadi.",
+        problems: [
+          {
+            problem_number: "3",
+            status: "incorrect",
+            feedback: "Diskriminant hisobida ishora xatosi bor.",
+            errors: [{ description: "D = b^2 - 4ac formulasi noto'g'ri qo'llangan", suggestion: "c manfiy bo'lsa, -4ac musbat qiymat beradi." }],
+          },
+        ],
+      },
+    };
+    const demoHomeworks: Homework[] = [
+      {
+        id: "student_hw_quad",
+        class_id: "class_8a_student",
+        title: "Kvadrat tenglamalar",
+        subject: "Matematika",
+        description: "Berilgan tenglamalarni yeching va javoblaringizni izohlash bilan topshiring.",
+        status: "published",
+        max_score: 5,
+        student_status: "pending",
+        deadline: "Bugun, 23:59",
+      },
+      {
+        id: "student_hw_system",
+        class_id: "class_8a_student",
+        title: "Chiziqli tenglamalar sistemasi",
+        subject: "Matematika",
+        description: "Sistema yechimlarini taqqoslash usuli bilan toping.",
+        status: "graded",
+        max_score: 5,
+        student_status: "submitted",
+        latest_score: 4.2,
+        latest_percentage: 84,
+        latest_submission: gradedSubmission,
+        deadline: "16.08.2026",
+      },
+      {
+        id: "student_hw_force",
+        class_id: "class_8a_student",
+        title: "Kuch va harakat",
+        subject: "Fizika",
+        description: "Nyuton qonunlari bo'yicha 6 ta masalani yeching.",
+        status: "published",
+        max_score: 5,
+        student_status: "pending",
+        deadline: "Ertaga, 18:00",
+      },
+      {
+        id: "student_hw_grammar",
+        class_id: "class_8a_student",
+        title: "Matn tahlili",
+        subject: "Ona tili",
+        description: "Berilgan matndan ega va kesimni toping.",
+        status: "graded",
+        max_score: 5,
+        student_status: "submitted",
+        latest_score: 4.6,
+        latest_percentage: 92,
+        deadline: "15.08.2026",
+      },
+    ];
+
+    setClasses([{ id: "class_8a_student", name: "8-A", subject: "Matematika", join_code: "M8A24", student_count: 28 }]);
+    setSelectedClassId("class_8a_student");
+    setHomeworks(demoHomeworks);
+    setAllTeacherHomeworks([]);
+    setTeacherDashboard(null);
+    setClassStudents([]);
+    setSelectedTeacherClassId("");
+    setTeacherSubmissions([]);
+    setStudentSubmissionsByHomework({ student_hw_system: [gradedSubmission] });
+  }
+
+  function seedLocalDashboard(role: Role) {
+    if (role === "teacher") {
+      seedLocalTeacherDashboard();
+    } else {
+      seedLocalStudentDashboard();
+    }
+  }
 
   const loadTeacherHomeworks = useCallback(async (userId: string, classId: string) => {
     const list = (await getClassHomeworks(userId, classId)) as Homework[];
@@ -464,17 +966,6 @@ export default function App() {
     try {
       const analytics = (await getTeacherDashboard(userId)) as TeacherDashboard;
       setTeacherDashboard(analytics);
-      setDashboardClassId((current) => (
-        current && analytics.classes.some((item) => item.id === current)
-          ? current
-          : ""
-      ));
-      setDashboardSubject((current) => (
-        current && analytics.subjects.some((item) => item.subject === current) ? current : ""
-      ));
-      setDashboardStudentId((current) => (
-        current && analytics.students.some((item) => item.id === current) ? current : ""
-      ));
       return analytics;
     } finally {
       setDashboardLoading(false);
@@ -510,7 +1001,12 @@ export default function App() {
           seedLatestSubmissions(list);
         }
       } catch (caught) {
-        setError(getErrorMessage(caught));
+        if (isLocalhost) {
+          console.warn("loadDashboard failed: using local mock dashboard", caught);
+          seedLocalDashboard(nextUser.role);
+        } else {
+          setError(getErrorMessage(caught));
+        }
       } finally {
         setRefreshing(false);
       }
@@ -537,7 +1033,21 @@ export default function App() {
           await loadDashboard(auth.user);
         }
       } catch (caught) {
-        setError(getErrorMessage(caught));
+        if (isLocalhost) {
+          console.warn("API ulanish xatosi, local mock o'qituvchi rejimida davom etiladi:", caught);
+          const mockUser: User = {
+            id: "mock_teacher_id",
+            telegram_id: 123456789,
+            telegram_username: "mock_teacher",
+            photo_url: "https://api.dicebear.com/7.x/adventurer/svg?seed=Ali",
+            full_name: "Mock O'qituvchi (Demo)",
+            role: "teacher"
+          };
+          setUser(mockUser);
+          seedLocalDashboard("teacher");
+        } else {
+          setError(getErrorMessage(caught));
+        }
       } finally {
         setLoading(false);
       }
@@ -572,17 +1082,370 @@ export default function App() {
     }
   }, [user?.role, user?.id, selectedTeacherClassId, loadTeacherHomeworks, loadTeacherAnalytics]);
 
+  useEffect(() => {
+    if (user?.role === "teacher" && currentTab === "question_bank") {
+      void loadGradesList(user.id);
+      void loadQuestionBankQuestions(user.id);
+    }
+  }, [currentTab, user?.role, user?.id, loadGradesList, loadQuestionBankQuestions]);
+
+  useEffect(() => {
+    if (user?.role === "teacher" && qbGrade !== "") {
+      void loadTopicsList(user.id, Number(qbGrade));
+    } else if (user?.role === "teacher") {
+      void loadTopicsList(user.id);
+    }
+    setQbTopicId("");
+    setQbSkillsList([]);
+    setQbSelectedSkills([]);
+  }, [qbGrade, user?.role, user?.id, loadTopicsList]);
+
+  useEffect(() => {
+    if (user?.role === "teacher" && qbTopicId) {
+      void loadSkillsList(user.id, qbTopicId);
+    } else {
+      setQbSkillsList([]);
+    }
+    setQbSelectedSkills([]);
+  }, [qbTopicId, user?.role, user?.id, loadSkillsList]);
+
+  useEffect(() => {
+    if (studentUploadStep !== "loading") return;
+    setStudentProgressPercent(0);
+    const interval = setInterval(() => {
+      setStudentProgressPercent((prev) => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setTimeout(() => {
+            setStudentUploadStep("result");
+          }, 300);
+          return 100;
+        }
+        return prev + 5;
+      });
+    }, 150);
+    return () => clearInterval(interval);
+  }, [studentUploadStep]);
+
+  async function handleCreateCustomTopic() {
+    if (!user || !qbGrade || !customTopicName.trim()) return;
+    setBusyAction("create-custom-topic");
+    setError("");
+    setNotice("");
+    try {
+      const topic = await createTopic(user.id, {
+        grade: Number(qbGrade),
+        name: customTopicName.trim(),
+        subject: "mathematics"
+      });
+      setQbTopicsList(prev => [...prev, topic]);
+      setQbTopicId(topic.id);
+      setShowCustomTopicInput(false);
+      setCustomTopicName("");
+      setNotice("Yangi mavzu yaratildi!");
+    } catch (caught) {
+      if (isLocalhost) {
+        const mockTopic = {
+          id: "custom_" + Date.now(),
+          grade: Number(qbGrade),
+          name: customTopicName.trim(),
+          subject: "mathematics",
+          slug: customTopicName.toLowerCase().replace(/\s+/g, "_")
+        };
+        setQbTopicsList(prev => [...prev, mockTopic]);
+        setQbTopicId(mockTopic.id);
+        setShowCustomTopicInput(false);
+        setCustomTopicName("");
+        setNotice("Yangi mavzu yaratildi (Mock)!");
+      } else {
+        setError(getErrorMessage(caught));
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleExtractQuestions(event: FormEvent) {
+    event.preventDefault();
+    if (!user) return;
+    if (!qbGrade || !qbTopicId) {
+      setError("Iltimos, Sinf va Mavzuni tanlang.");
+      return;
+    }
+    if (!qbTextContent.trim() && !qbFile) {
+      setError("Iltimos, rasm yuklang yoki matn kiriting.");
+      return;
+    }
+
+    setQbExtracting(true);
+    setError("");
+    setNotice("");
+    setQbExtractedResult([]);
+
+    const formData = new FormData();
+    formData.append("subject_id", qbSubject);
+    formData.append("grade", String(qbGrade));
+    formData.append("topic_id", qbTopicId);
+    if (qbTextContent.trim()) {
+      formData.append("text_content", qbTextContent.trim());
+    }
+    if (qbFile) {
+      formData.append("image", qbFile);
+    }
+
+    try {
+      const data = await extractQuestions(user.id, formData);
+      setQbExtractedResult(data.questions || []);
+      setNotice("Savollar muvaffaqiyatli tahlil qilindi va saqlandi!");
+      // Reset wizard inputs
+      setQbTextContent("");
+      setQbFile(null);
+      // Refresh the main question list
+      void loadQuestionBankQuestions(user.id);
+    } catch (err) {
+      if (isLocalhost) {
+        const mockExtracted = [
+          {
+            id: "mock_e1_" + Date.now(),
+            grade: Number(qbGrade),
+            topic_id: qbTopicId,
+            question_text: qbTextContent ? `Matn asosida savol: ${qbTextContent.substring(0, 30)}` : "Rasm asosidagi mock algebra savoli",
+            question_type: "numeric",
+            correct_answer: "12",
+            difficulty: 2,
+            status: "draft",
+            solution_steps: ["1-qadam: Tenglamani soddalashtiring.", "2-qadam: Noma'lumni toping."],
+            variant_allowed: true,
+            variant_template: { template_type: "ax_plus_b_equals_c", parameters: { a: 1, b: 0, c: 12 } }
+          },
+          {
+            id: "mock_e2_" + Date.now(),
+            grade: Number(qbGrade),
+            topic_id: qbTopicId,
+            question_text: "Quyidagilardan qaysi biri to'g'ri kasr?",
+            question_type: "multiple_choice",
+            options: ["5/3", "3/4", "7/2", "9/5"],
+            correct_option_index: 1,
+            correct_answer: "3/4",
+            difficulty: 1,
+            status: "draft",
+            solution_steps: ["Surati maxrajidan kichik bo'lgan kasr to'g'ri kasr deyiladi."],
+            variant_allowed: false
+          }
+        ];
+        setQbExtractedResult(mockExtracted);
+        setQbQuestions(prev => [...mockExtracted, ...prev]);
+        setNotice("Savollar tahlil qilindi (Mock rejim)!");
+        setQbTextContent("");
+        setQbFile(null);
+      } else {
+        setError(getErrorMessage(err));
+      }
+    } finally {
+      setQbExtracting(false);
+    }
+  }
+
+  async function handleApproveQuestion(questionId: string) {
+    if (!user) return;
+    try {
+      await updateQuestionStatus(user.id, questionId, "approved");
+      setNotice("Savol tasdiqlandi!");
+      void loadQuestionBankQuestions(user.id);
+      // update extracted list if visible
+      setQbExtractedResult(prev => prev.map(q => q.id === questionId ? { ...q, status: "approved" } : q));
+    } catch (err) {
+      if (isLocalhost) {
+        setQbQuestions(prev => prev.map(q => q.id === questionId ? { ...q, status: "approved" } : q));
+        setQbExtractedResult(prev => prev.map(q => q.id === questionId ? { ...q, status: "approved" } : q));
+        setNotice("Savol tasdiqlandi (Mock)!");
+      } else {
+        setError(getErrorMessage(err));
+      }
+    }
+  }
+
+  async function handleRejectQuestion(questionId: string) {
+    if (!user) return;
+    try {
+      await updateQuestionStatus(user.id, questionId, "rejected");
+      setNotice("Savol rad etildi.");
+      void loadQuestionBankQuestions(user.id);
+      setQbExtractedResult(prev => prev.map(q => q.id === questionId ? { ...q, status: "rejected" } : q));
+    } catch (err) {
+      if (isLocalhost) {
+        setQbQuestions(prev => prev.map(q => q.id === questionId ? { ...q, status: "rejected" } : q));
+        setQbExtractedResult(prev => prev.map(q => q.id === questionId ? { ...q, status: "rejected" } : q));
+        setNotice("Savol rad etildi (Mock).");
+      } else {
+        setError(getErrorMessage(err));
+      }
+    }
+  }
+
+  async function handleArchiveQuestion(questionId: string) {
+    if (!user) return;
+    try {
+      await updateQuestionStatus(user.id, questionId, "archived");
+      setNotice("Savol arxivlandi.");
+      void loadQuestionBankQuestions(user.id);
+    } catch (err) {
+      if (isLocalhost) {
+        setQbQuestions(prev => prev.filter(q => q.id !== questionId));
+        setNotice("Savol arxivlandi (Mock).");
+      } else {
+        setError(getErrorMessage(err));
+      }
+    }
+  }
+
+  async function handleApproveAllQuestions() {
+    if (!user || !qbQuestions.length) return;
+    const drafts = qbQuestions.filter(q => q.status === "draft");
+    if (!drafts.length) return;
+    
+    setBusyAction("approve-all");
+    setError("");
+    setNotice("");
+    try {
+      await Promise.all(drafts.map(q => updateQuestionStatus(user.id, q.id, "approved")));
+      setNotice("Barcha qoralamalar tasdiqlandi!");
+      void loadQuestionBankQuestions(user.id);
+    } catch (err) {
+      if (isLocalhost) {
+        setQbQuestions(prev => prev.map(q => q.status === "draft" ? { ...q, status: "approved" } : q));
+        setNotice("Barcha qoralamalar tasdiqlandi (Mock)!");
+      } else {
+        setError(getErrorMessage(err));
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleApproveAllExtracted() {
+    if (!user || !qbExtractedResult.length) return;
+    const drafts = qbExtractedResult.filter(q => q.status === "draft");
+    if (!drafts.length) return;
+    
+    setBusyAction("approve-all-extracted");
+    setError("");
+    setNotice("");
+    try {
+      await Promise.all(drafts.map(q => updateQuestionStatus(user.id, q.id, "approved")));
+      setNotice("Barcha yangi aniqlangan savollar tasdiqlandi!");
+      void loadQuestionBankQuestions(user.id);
+      setQbExtractedResult(prev => prev.map(q => q.status === "draft" ? { ...q, status: "approved" } : q));
+    } catch (err) {
+      if (isLocalhost) {
+        setQbQuestions(prev => prev.map(q => q.status === "draft" ? { ...q, status: "approved" } : q));
+        setQbExtractedResult(prev => prev.map(q => q.status === "draft" ? { ...q, status: "approved" } : q));
+        setNotice("Barcha yangi aniqlangan savollar tasdiqlandi (Mock)!");
+      } else {
+        setError(getErrorMessage(err));
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleUpdateQuestion(event: FormEvent) {
+    event.preventDefault();
+    if (!user || !qbEditingQuestion) return;
+    try {
+      await updateQuestion(user.id, qbEditingQuestion.id, qbEditingQuestion);
+      setNotice("Savol tahrirlandi!");
+      setQbEditingQuestion(null);
+      void loadQuestionBankQuestions(user.id);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  }
+
+  async function handleGenerateVariantTest() {
+    if (!user || !qbTestingVariantId) return;
+    setBusyAction("generate-variant");
+    setQbVariantResult(null);
+    try {
+      const data = await generateVariant(user.id, qbTestingVariantId, qbVariantParams);
+      setQbVariantResult(data);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function openProfileEditor() {
+    setProfileDraft({ full_name: user?.full_name || "" });
+    setProfileEditing(true);
+  }
+
+  async function handleProfileSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!user) return;
+
+    const fullName = profileDraft.full_name.trim();
+    if (fullName.length < 2) {
+      setError("Ism va familiya juda qisqa.");
+      return;
+    }
+
+    setBusyAction("profile-save");
+    setError("");
+    setNotice("");
+    try {
+      await updateProfile(user.id, { full_name: fullName });
+      setUser({ ...user, full_name: fullName });
+      setProfileEditing(false);
+      setNotice("Profil ma'lumotlari yangilandi.");
+    } catch (caught) {
+      if (isLocalhost) {
+        setUser({ ...user, full_name: fullName });
+        setProfileEditing(false);
+        setNotice("Profil ma'lumotlari lokal demo rejimida yangilandi.");
+      } else {
+        setError(getErrorMessage(caught));
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function resetRoleViews() {
+    setCurrentTab("home");
+    setStudentSelectedHomeworkId(null);
+    setStudentUploadStep("detail");
+    setSelectedTeacherClassId("");
+    setSelectedClassStudentId(null);
+    setTeacherStudentSearch("");
+    setClassSubTab("students");
+    setToolsActiveView("home");
+  }
+
   async function chooseRole(role: Role) {
+
     if (!user) return;
     setBusyAction(`role-${role}`);
     setError("");
+    setNotice("");
     try {
       await updateRole(user.id, role);
       const nextUser = { ...user, role };
       setUser(nextUser);
+      resetRoleViews();
       await loadDashboard(nextUser);
+      setNotice(role === "teacher" ? "O'qituvchi rejimiga o'tildi." : "O'quvchi rejimiga o'tildi.");
     } catch (caught) {
-      setError(getErrorMessage(caught));
+      if (isLocalhost) {
+        const nextUser = { ...user, role };
+        setUser(nextUser);
+        resetRoleViews();
+        await loadDashboard(nextUser);
+        setNotice(`Rol muvaffaqiyatli ${role} ga o'zgartirildi (Mock)`);
+      } else {
+        setError(getErrorMessage(caught));
+      }
     } finally {
       setBusyAction(null);
     }
@@ -688,7 +1551,7 @@ export default function App() {
       await analyzeHomeworkSource(user.id, homeworkId, sourceFile, problemRange.trim());
       setNotice("Rasm tahlil qilindi.");
       setSourceFile(null);
-      
+
       const activeHomework = allTeacherHomeworks.find(h => h.id === homeworkId);
       const activeClassId = activeHomework?.class_id || selectedClassId || selectedTeacherClassId;
       if (activeClassId) {
@@ -712,7 +1575,7 @@ export default function App() {
     try {
       await approveAnswerKey(user.id, homework.id, homework.ai_generated_answer_key);
       setNotice("Javob kaliti tasdiqlandi.");
-      
+
       const activeClassId = homework.class_id || selectedClassId || selectedTeacherClassId;
       if (activeClassId) {
         await loadTeacherHomeworks(user.id, activeClassId);
@@ -735,7 +1598,7 @@ export default function App() {
     try {
       await publishHomework(user.id, homeworkId);
       setNotice("Vazifa o'quvchilarga yuborildi.");
-      
+
       const activeHomework = allTeacherHomeworks.find(h => h.id === homeworkId);
       const activeClassId = activeHomework?.class_id || selectedClassId || selectedTeacherClassId;
       if (activeClassId) {
@@ -801,6 +1664,140 @@ export default function App() {
       setStudentSubmissionsByHomework((prev) => ({ ...prev, [homeworkId]: sortSubmissions(list) }));
     } catch (caught) {
       setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function findToolStudent(studentName: string) {
+    return classStudents.find((student) => student.full_name === studentName || student.name === studentName);
+  }
+
+  function findToolClass(className?: string) {
+    return classes.find((item) => item.name === className) || classes.find((item) => item.id === selectedTeacherClassId);
+  }
+
+  async function handleCheckDiktant() {
+    if (!user || !diktantImage || !diktantStudent || !diktantText.trim()) return;
+    const student = findToolStudent(diktantStudent);
+    const activeClass = findToolClass();
+    setBusyAction("check-diktant");
+    setError("");
+    setNotice("");
+    setDiktantStep(4);
+    try {
+      const result = await checkDiktant(user.id, {
+        originalText: diktantText.trim(),
+        studentName: diktantStudent,
+        studentId: student?.id,
+        classId: activeClass?.id,
+        className: activeClass?.name,
+        title: "Diktant",
+        subject: "Ona tili",
+        maxScore: 10,
+        image: diktantImage,
+      });
+      setDiktantResult(result);
+      setDiktantStep(5);
+      setNotice("Diktant AI yordamida tekshirildi.");
+      await loadDashboard(user);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+      setDiktantStep(3);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleCheckTestManual() {
+    if (!user || !testStudent) return;
+    const student = findToolStudent(testStudent);
+    const activeClass = findToolClass(testClass);
+    setBusyAction("check-test");
+    setError("");
+    setNotice("");
+    try {
+      const result = await checkTestManual(user.id, {
+        title: testName,
+        className: activeClass?.name || testClass,
+        classId: activeClass?.id,
+        studentName: testStudent,
+        studentId: student?.id,
+        subject: "Matematika",
+        maxScore: testMaxScore,
+        answerKey: testKeySaved,
+        studentAnswers: testStudentAnswers,
+      });
+      setTestResult(result);
+      setTestStep(5);
+      setNotice("Test javoblari tekshirildi va bazaga yozildi.");
+      await loadDashboard(user);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleCheckTestScan() {
+    if (!user || !testStudent || !testImage) return;
+    const student = findToolStudent(testStudent);
+    const activeClass = findToolClass(testClass);
+    setBusyAction("scan-test");
+    setError("");
+    setNotice("");
+    setTestStep(6);
+    try {
+      const result = await checkTestScan(user.id, {
+        title: testName,
+        className: activeClass?.name || testClass,
+        classId: activeClass?.id,
+        studentName: testStudent,
+        studentId: student?.id,
+        subject: "Matematika",
+        maxScore: testMaxScore,
+        questionCount: testQuestionCount,
+        answerKey: testKeySaved,
+        image: testImage,
+      });
+      setTestResult(result);
+      setTestStep(5);
+      setNotice("Test rasmi o'qildi, tekshirildi va bazaga yozildi.");
+      await loadDashboard(user);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+      setTestStep(3);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleCheckControlWork() {
+    if (!user || !cwImage || !cwStudent) return;
+    const student = findToolStudent(cwStudent);
+    const activeClass = findToolClass(cwClass);
+    setBusyAction("check-control-work");
+    setError("");
+    setNotice("");
+    setCwStep(3);
+    try {
+      const result = await checkControlWork(user.id, {
+        title: cwName,
+        subject: cwSubject,
+        studentName: cwStudent,
+        studentId: student?.id,
+        classId: activeClass?.id,
+        className: activeClass?.name || cwClass,
+        maxScore: cwMaxScore,
+        image: cwImage,
+      });
+      setCwResult(result);
+      setCwStep(4);
+      setNotice("Nazorat ishi AI yordamida tekshirildi.");
+      await loadDashboard(user);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+      setCwStep(2);
     } finally {
       setBusyAction(null);
     }
@@ -895,7 +1892,7 @@ export default function App() {
                 <p>Sinflaringizni boshqaring va natijalarni kuzating</p>
               </div>
               <div className="role-arrow" style={{ background: "var(--primary)", color: "white", width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", marginLeft: "auto" }}>
-                →
+                â†’
               </div>
             </button>
             <button
@@ -912,7 +1909,7 @@ export default function App() {
                 <p>Uy vazifalarini topshiring va AI yordamida o'sib boring</p>
               </div>
               <div className="role-arrow" style={{ background: "var(--secondary)", color: "white", width: "28px", height: "28px", borderRadius: "50%", display: "grid", placeItems: "center", marginLeft: "auto" }}>
-                →
+                â†’
               </div>
             </button>
           </div>
@@ -928,17 +1925,17 @@ export default function App() {
     <main className="app-container">
       <section className="page-content pb-20" style={{ paddingTop: "1.2rem" }}>
         {refreshing ? (
-          <div style={{ 
-            display: "flex", 
-            justifyContent: "center", 
-            alignItems: "center", 
-            gap: "8px", 
-            padding: "8px 12px", 
-            background: "rgba(59, 130, 246, 0.08)", 
-            color: "var(--primary)", 
-            borderRadius: "12px", 
-            fontSize: "0.8rem", 
-            fontWeight: 700, 
+          <div style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            gap: "8px",
+            padding: "8px 12px",
+            background: "rgba(59, 130, 246, 0.08)",
+            color: "var(--primary)",
+            borderRadius: "12px",
+            fontSize: "0.8rem",
+            fontWeight: 700,
             marginBottom: "12px",
             border: "1px solid rgba(59, 130, 246, 0.15)"
           }}>
@@ -948,62 +1945,97 @@ export default function App() {
         ) : null}
         {error ? <div className="alert error">{error}</div> : null}
         {notice ? <div className="alert success">{notice}</div> : null}
-        
-        {user.role === "teacher" && ["home", "classes", "homeworks"].includes(currentTab) && renderTeacher()}
-        {user.role === "student" && ["home", "homeworks"].includes(currentTab) && renderStudent()}
-        
-        {user.role === "student" && currentTab === "progress" && renderProgress()}
+
+        {user.role === "teacher" && ["home", "classes", "homeworks", "tools", "add_wizard"].includes(currentTab) && renderTeacher()}
+        {user.role === "teacher" && currentTab === "journal" && renderJournal()}
+        {user.role === "student" && studentSelectedHomeworkId && ["home", "homeworks", "practice", "tutor", "progress"].includes(currentTab) && renderStudent()}
+        {user.role === "student" && !studentSelectedHomeworkId && ["home", "homeworks"].includes(currentTab) && renderStudent()}
+        {user.role === "student" && !studentSelectedHomeworkId && currentTab === "practice" && renderPractice()}
+        {user.role === "student" && !studentSelectedHomeworkId && currentTab === "tutor" && renderTutor()}
+        {user.role === "student" && !studentSelectedHomeworkId && currentTab === "progress" && renderProgress()}
         {currentTab === "profile" && renderProfile()}
       </section>
 
       <nav className="bottom-nav">
-        <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => setCurrentTab("home")}>
-          <Home size={22} />
-          <span>Asosiy</span>
-        </button>
         {user.role === "teacher" ? (
           <>
+            <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => setCurrentTab("home")}>
+              <Home size={24} />
+              <span>Bosh sahifa</span>
+            </button>
             <button className={`nav-item ${currentTab === "classes" ? "active" : ""}`} onClick={() => setCurrentTab("classes")}>
-              <School size={22} />
+              <UsersRound size={24} />
               <span>Sinflar</span>
             </button>
-            <button className={`nav-item ${currentTab === "homeworks" ? "active" : ""}`} onClick={() => setCurrentTab("homeworks")}>
-              <ClipboardList size={22} />
-              <span>Vazifalar</span>
+            
+            <div className="nav-fab-container">
+               <button className="nav-fab" onClick={() => setCurrentTab("add_wizard")}>
+                  <Plus size={30} />
+               </button>
+            </div>
+
+            <button className={`nav-item ${currentTab === "tools" ? "active" : ""}`} onClick={() => setCurrentTab("tools")}>
+              <Wrench size={24} />
+              <span>Vositalar</span>
+            </button>
+            <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => setCurrentTab("profile")}>
+              <UserRound size={24} />
+              <span>Profil</span>
             </button>
           </>
         ) : (
           <>
+            <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => setCurrentTab("home")}>
+              <Home size={24} />
+              <span>Bosh sahifa</span>
+            </button>
             <button className={`nav-item ${currentTab === "homeworks" ? "active" : ""}`} onClick={() => setCurrentTab("homeworks")}>
-              <BookOpen size={22} />
+              <BookOpen size={24} />
               <span>Vazifalar</span>
             </button>
-            <button className={`nav-item ${currentTab === "progress" ? "active" : ""}`} onClick={() => setCurrentTab("progress")}>
-              <TrendingUp size={22} />
-              <span>Progress</span>
+            <button className={`nav-item ${currentTab === "practice" ? "active" : ""}`} onClick={() => setCurrentTab("practice")}>
+              <PenTool size={24} />
+              <span>Takrorlash</span>
+            </button>
+            <button className={`nav-item ${currentTab === "tutor" ? "active" : ""}`} onClick={() => setCurrentTab("tutor")}>
+              <MessageCircle size={24} />
+              <span>AI izoh</span>
+            </button>
+            <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => setCurrentTab("profile")}>
+              <UserRound size={24} />
+              <span>Profil</span>
             </button>
           </>
         )}
-        <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => setCurrentTab("profile")}>
-          <UserRound size={22} />
-          <span>Profil</span>
-        </button>
       </nav>
     </main>
   );
 
   function renderTeacher() {
+    if (currentTab === "add_wizard") {
+      return renderAddWizard();
+    }
+    if (currentTab === "tools") {
+      return renderTeacherTools();
+    }
     if (currentTab === "classes") {
       if (selectedTeacherClassId) {
         const activeClass = classes.find(c => c.id === selectedTeacherClassId);
         const classHws = homeworks.filter(h => h.class_id === selectedTeacherClassId);
-        
+        const filteredClassStudents = classStudents.filter((student) =>
+          (student.full_name || "").toLowerCase().includes(teacherStudentSearch.trim().toLowerCase()) ||
+          (student.telegram_username || "").toLowerCase().includes(teacherStudentSearch.trim().toLowerCase())
+        );
+        const selectedClassStudent = classStudents.find((student) => student.id === selectedClassStudentId);
+
         return (
           <div className="animate-fade-in">
-            <button 
-              className="btn btn-outline" 
+            <button
+              className="btn btn-outline"
               onClick={() => {
                 setSelectedTeacherClassId("");
+                setSelectedClassStudentId(null);
+                setTeacherStudentSearch("");
                 setClassStudents([]);
               }}
               style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "1.2rem", padding: "0.5rem 1rem", fontSize: "0.85rem" }}
@@ -1026,9 +2058,9 @@ export default function App() {
                     <p className="eyebrow" style={{ color: "rgba(255,255,255,0.7)", margin: 0, fontSize: "0.65rem" }}>KOD</p>
                     <div className="flex-start" style={{ gap: "6px", marginTop: "4px" }}>
                       <strong style={{ fontSize: "1.1rem", color: "white", letterSpacing: "0.05em" }}>{activeClass.join_code}</strong>
-                      <button 
-                        className="icon-btn" 
-                        style={{ width: "26px", height: "26px", background: "rgba(255, 255, 255, 0.2)", border: "none", color: "white" }} 
+                      <button
+                        className="icon-btn"
+                        style={{ width: "26px", height: "26px", background: "rgba(255, 255, 255, 0.2)", border: "none", color: "white" }}
                         onClick={(e) => {
                           e.stopPropagation();
                           void copyJoinCode(activeClass.join_code || "");
@@ -1044,22 +2076,25 @@ export default function App() {
 
             {/* Sub-tabs: O'quvchilar, Vazifalar, Baholar */}
             <div className="tabs-container class-tabs" style={{ display: "flex", gap: "8px", marginBottom: "1.2rem", background: "var(--background)", padding: "4px", borderRadius: "12px", border: "1px solid var(--border)" }}>
-              <button 
-                className={`tab-btn ${classSubTab === "students" ? "active" : ""}`} 
-                onClick={() => setClassSubTab("students")}
+              <button
+                className={`tab-btn ${classSubTab === "students" ? "active" : ""}`}
+                onClick={() => {
+                  setClassSubTab("students");
+                  setSelectedClassStudentId(null);
+                }}
                 style={{ flex: 1, padding: "8px", fontSize: "0.85rem", fontWeight: 700, borderRadius: "8px" }}
               >
                 O'quvchilar
               </button>
-              <button 
-                className={`tab-btn ${classSubTab === "homeworks" ? "active" : ""}`} 
+              <button
+                className={`tab-btn ${classSubTab === "homeworks" ? "active" : ""}`}
                 onClick={() => setClassSubTab("homeworks")}
                 style={{ flex: 1, padding: "8px", fontSize: "0.85rem", fontWeight: 700, borderRadius: "8px" }}
               >
                 Vazifalar
               </button>
-              <button 
-                className={`tab-btn ${classSubTab === "grades" ? "active" : ""}`} 
+              <button
+                className={`tab-btn ${classSubTab === "grades" ? "active" : ""}`}
                 onClick={() => setClassSubTab("grades")}
                 style={{ flex: 1, padding: "8px", fontSize: "0.85rem", fontWeight: 700, borderRadius: "8px" }}
               >
@@ -1067,42 +2102,103 @@ export default function App() {
               </button>
             </div>
 
-            {classSubTab === "students" && (
+            {classSubTab === "students" && (selectedClassStudent ? renderTeacherStudentProfile(selectedClassStudent, activeClass?.name) : (
               <div className="card" style={{ padding: "1rem" }}>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 12px" }}>O'quvchilar Ro'yxati</h3>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: 0 }}>O'quvchilar Ro'yxati</h3>
+                  <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{classStudents.length} ta o'quvchi</span>
+                </div>
+                <div style={{ position: "relative", marginBottom: "12px" }}>
+                  <Search size={16} color="var(--text-muted)" style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)" }} />
+                  <input
+                    className="input-field"
+                    value={teacherStudentSearch}
+                    onChange={(event) => setTeacherStudentSearch(event.target.value)}
+                    placeholder="Ism yoki username bo'yicha qidirish"
+                    style={{ paddingLeft: "36px", margin: 0 }}
+                  />
+                </div>
+
+                {classStudents.length > 0 && classStudents.filter(s => (s.average_score || 0) < 60).length > 0 && (
+                  <div style={{ background: "rgba(239, 68, 68, 0.06)", border: "1px solid rgba(239, 68, 68, 0.15)", padding: "12px 14px", borderRadius: "12px", marginBottom: "16px" }}>
+                    <h4 style={{ color: "var(--danger)", display: "flex", alignItems: "center", gap: "6px", margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 800 }}>
+                      <AlertCircle size={15} /> Diqqat talab qiladigan o'quvchilar (Qizil ro'yxat)
+                    </h4>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {classStudents.filter(s => (s.average_score || 0) < 60).map(student => (
+                        <div key={student.id} className="flex-between" style={{ padding: "8px 10px", background: "white", borderRadius: "8px", borderLeft: "4px solid var(--danger)", boxShadow: "0 1px 3px rgba(0,0,0,0.02)" }}>
+                          <span style={{ fontWeight: 700, fontSize: "0.8rem", color: "var(--text-main)" }}>{student.full_name}</span>
+                          <span className="badge" style={{ background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", fontWeight: 800, fontSize: "0.7rem", padding: "2px 6px", borderRadius: "4px" }}>
+                            Natija: {student.average_score || 0}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {classStudentsLoading ? (
                   <div className="flex-center" style={{ padding: "2rem", color: "var(--text-muted)" }}>Yuklanmoqda...</div>
                 ) : classStudents.length === 0 ? (
                   <div className="empty-state compact">Ushbu sinfda hali o'quvchilar yo'q.</div>
+                ) : filteredClassStudents.length === 0 ? (
+                  <div className="empty-state compact">Qidiruv bo'yicha o'quvchi topilmadi.</div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {classStudents.map((student) => (
-                      <div key={student.id} className="flex-between" style={{ padding: "10px", background: "var(--background)", borderRadius: "12px", border: "1px solid var(--border)" }}>
-                        <div className="flex-start" style={{ gap: "10px" }}>
-                          <div style={{ width: "36px", height: "36px", borderRadius: "50%", background: "rgba(59, 130, 246, 0.1)", color: "var(--primary)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: "0.85rem" }}>
-                            {initials(student.full_name)}
+                    {filteredClassStudents.map((student) => {
+                      const isLowPerformer = (student.average_score || 0) < 60;
+                      return (
+                        <div
+                          key={student.id}
+                          className="flex-between animate-fade-in"
+                          onClick={() => setSelectedClassStudentId(student.id)}
+                          style={{
+                            padding: "10px",
+                            background: isLowPerformer ? "rgba(239, 68, 68, 0.02)" : "var(--background)",
+                            borderRadius: "12px",
+                            border: isLowPerformer ? "1px solid rgba(239, 68, 68, 0.2)" : "1px solid var(--border)",
+                            cursor: "pointer"
+                          }}
+                        >
+                          <div className="flex-start" style={{ gap: "10px" }}>
+                            <div style={{
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "50%",
+                              background: isLowPerformer ? "rgba(239, 68, 68, 0.1)" : "rgba(59, 130, 246, 0.1)",
+                              color: isLowPerformer ? "var(--danger)" : "var(--primary)",
+                              display: "grid",
+                              placeItems: "center",
+                              fontWeight: 700,
+                              fontSize: "0.85rem"
+                            }}>
+                              {initials(student.full_name)}
+                            </div>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700 }}>
+                                {student.full_name}
+                                {isLowPerformer && <span style={{ marginLeft: "6px", color: "var(--danger)", fontSize: "0.65rem", background: "rgba(239, 68, 68, 0.1)", padding: "1px 4px", borderRadius: "4px", fontWeight: 800 }}>FAOL E'TIBOR</span>}
+                              </h4>
+                              <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                                {student.telegram_username ? `@${student.telegram_username}` : "Username yo'q"}
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700 }}>{student.full_name}</h4>
-                            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                              {student.telegram_username ? `@${student.telegram_username}` : "Username yo'q"}
-                            </p>
+                          <div style={{ textAlign: "right" }}>
+                            <div style={{ fontSize: "0.9rem", fontWeight: 800, color: isLowPerformer ? "var(--danger)" : "var(--secondary)" }}>
+                              {student.average_score}%
+                            </div>
+                            <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                              {student.submission_count} ta topshirdi
+                            </span>
                           </div>
                         </div>
-                        <div style={{ textAlign: "right" }}>
-                          <div style={{ fontSize: "0.9rem", fontWeight: 800, color: "var(--secondary)" }}>
-                            {student.average_score}%
-                          </div>
-                          <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                            {student.submission_count} ta topshirdi
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
-            )}
+            ))}
 
             {classSubTab === "homeworks" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -1142,49 +2238,61 @@ export default function App() {
 
       return (
         <div className="animate-fade-in">
-          <div className="section-title">
-            <h2>Sinflarni boshqarish</h2>
-          </div>
-          <form className="panel" onSubmit={handleCreateClass}>
-            <div className="panel-title">
-              <School size={20} />
-              <h2>Yangi sinf yaratish</h2>
-            </div>
-            <div className="form-grid">
-              <label className="input-group">
-                <span className="input-label">Sinf nomi</span>
-                <input
-                  className="input-field"
-                  value={classForm.name}
-                  onChange={(event) => setClassForm({ ...classForm, name: event.target.value })}
-                  placeholder="7-A"
-                />
-              </label>
-              <label className="input-group">
-                <span className="input-label">Fan</span>
-                <select
-                  className="input-field"
-                  value={classForm.subject}
-                  onChange={(event) => setClassForm({ ...classForm, subject: event.target.value })}
-                >
-                  <option value="Matematika">Matematika</option>
-                  <option value="Fizika">Fizika</option>
-                  <option value="Ona tili">Ona tili</option>
-                </select>
-              </label>
-            </div>
-            <button className="btn btn-primary" type="submit" disabled={isBusy || !classForm.name.trim()}>
-              <Plus size={18} /> Yaratish
+          <div className="section-title flex-between" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.2rem" }}>
+            <h2 style={{ margin: 0 }}>Sinflarni boshqarish</h2>
+            <button
+              className="btn btn-primary"
+              type="button"
+              style={{ width: "36px", height: "36px", borderRadius: "50%", padding: 0, display: "grid", placeItems: "center", minWidth: "36px" }}
+              onClick={() => setShowCreateClassForm(!showCreateClassForm)}
+              title="Sinf yaratish"
+            >
+              <Plus size={20} />
             </button>
-          </form>
+          </div>
+
+          {showCreateClassForm && (
+            <form className="panel animate-fade-in" onSubmit={(e) => { handleCreateClass(e); setShowCreateClassForm(false); }} style={{ marginBottom: "1.5rem" }}>
+              <div className="panel-title">
+                <School size={20} />
+                <h2>Yangi sinf yaratish</h2>
+              </div>
+              <div className="form-grid">
+                <label className="input-group">
+                  <span className="input-label">Sinf nomi</span>
+                  <input
+                    className="input-field"
+                    value={classForm.name}
+                    onChange={(event) => setClassForm({ ...classForm, name: event.target.value })}
+                    placeholder="7-A"
+                  />
+                </label>
+                <label className="input-group">
+                  <span className="input-label">Fan</span>
+                  <select
+                    className="input-field"
+                    value={classForm.subject}
+                    onChange={(event) => setClassForm({ ...classForm, subject: event.target.value })}
+                  >
+                    <option value="Matematika">Matematika</option>
+                    <option value="Fizika">Fizika</option>
+                    <option value="Ona tili">Ona tili</option>
+                  </select>
+                </label>
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={isBusy || !classForm.name.trim()}>
+                <Plus size={18} /> Yaratish
+              </button>
+            </form>
+          )}
 
           {classes.length ? (
             <section className="class-list mt-2">
               <h3 className="text-sm text-muted mb-2">Mavjud sinflar (Batafsil ko'rish uchun tanlang)</h3>
               {classes.map((item) => (
-                <div 
-                  className="card card-interactive" 
-                  style={{ padding: "1rem", marginBottom: "0.8rem", cursor: "pointer" }} 
+                <div
+                  className="card card-interactive"
+                  style={{ padding: "1rem", marginBottom: "0.8rem", cursor: "pointer" }}
                   key={item.id}
                   onClick={() => {
                     setSelectedTeacherClassId(item.id);
@@ -1274,547 +2382,377 @@ export default function App() {
     }
 
     // HOME TAB
-    const unapprovedHws = allTeacherHomeworks.filter(h => !h.answer_key_approved);
-    const draftHws = allTeacherHomeworks.filter(h => h.status === "draft" && h.answer_key_approved);
-    
-    // Sort homeworks to show the newest ones first
-    const recentHws = [...allTeacherHomeworks].slice(-5).reverse();
+    const summary = teacherDashboard?.summary || { class_count: 6, published_homework_count: 12, submitted_student_count: 36, homework_count: 18 };
 
     return (
-      <div className="animate-fade-in">
-        <div style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.5rem", fontWeight: 800, margin: 0 }}>
-            Salom, {user?.full_name?.split(" ")[0]}! 👋
+      <div className="animate-fade-in pb-20">
+        <div style={{ marginBottom: "1.5rem", marginTop: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.6rem", fontWeight: 800, margin: 0, color: "var(--text-main)", letterSpacing: "-0.03em" }}>
+            Assalomu alaykum, {user?.full_name?.split(" ")[0] || "Ustoz"}!
           </h2>
-          <p style={{ margin: "2px 0 0", fontSize: "0.9rem", color: "var(--text-muted)" }}>
-            Bugun ajoyib dars bo'lsin!
+          <p style={{ margin: "4px 0 0", fontSize: "0.95rem", color: "var(--text-muted)", fontWeight: 500 }}>
+            Bugun ajoyib dars bo'lsin! âœ¨
           </p>
         </div>
 
-        {renderTeacherAnalyticsDashboard()}
-
-        <div style={{ marginBottom: "0.75rem" }}>
-          <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>E'tiborga muhtoj</h3>
+        <div className="stat-grid" style={{ marginBottom: "2rem" }}>
+          <div className="card" style={{ padding: "1.2rem", margin: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <div style={{ background: "rgba(59, 130, 246, 0.1)", padding: "6px", borderRadius: "8px", color: "var(--primary)" }}>
+                <School size={18} />
+              </div>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Sinflar soni</span>
+            </div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--text-main)" }}>{summary.class_count} <span style={{fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 500}}>ta sinf</span></div>
+          </div>
+          <div className="card" style={{ padding: "1.2rem", margin: 0 }}>
+             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <div style={{ background: "rgba(16, 185, 129, 0.1)", padding: "6px", borderRadius: "8px", color: "var(--secondary)" }}>
+                <BookOpen size={18} />
+              </div>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Faol uy vazifalar</span>
+            </div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--text-main)" }}>{summary.published_homework_count} <span style={{fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 500}}>ta</span></div>
+          </div>
+          <div className="card" style={{ padding: "1.2rem", margin: 0 }}>
+             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <div style={{ background: "rgba(139, 92, 246, 0.1)", padding: "6px", borderRadius: "8px", color: "#8b5cf6" }}>
+                <CheckCircle size={18} />
+              </div>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Bugun topshirdi</span>
+            </div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--text-main)" }}>{summary.submitted_student_count} <span style={{fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 500}}>ta ish</span></div>
+          </div>
+          <div className="card" style={{ padding: "1.2rem", margin: 0 }}>
+             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+              <div style={{ background: "rgba(245, 158, 11, 0.1)", padding: "6px", borderRadius: "8px", color: "var(--warning)" }}>
+                <Clock size={18} />
+              </div>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Tekshirishni kutmoqda</span>
+            </div>
+            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--text-main)" }}>{summary.homework_count} <span style={{fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 500}}>ta ish</span></div>
+          </div>
         </div>
 
-        {unapprovedHws.length > 0 || draftHws.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "1.5rem" }}>
-            {unapprovedHws.map(hw => (
-              <div key={hw.id} className="card" style={{ borderLeft: "4px solid var(--warning)", padding: "1rem" }}>
-                <div className="flex-between">
-                  <div className="flex-start" style={{ gap: "8px" }}>
-                    <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(245, 158, 11, 0.1)", display: "grid", placeItems: "center", color: "var(--warning)", fontSize: "0.8rem", fontWeight: "bold" }}>!</div>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: "0.85rem", fontWeight: 700 }}>Javoblar kalitini tasdiqlash kutilmoqda</h4>
-                      <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>"{hw.title}" vazifasi tahlil qilingan, lekin tasdiqlanmagan.</p>
-                    </div>
-                  </div>
+        <div style={{ marginBottom: "1rem" }}>
+          <h3 style={{ fontSize: "1.15rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>E'tibor talab qiladigan o'quvchilar (Qizil ro'yxat)</h3>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "1.8rem" }}>
+          <div className="card" style={{ background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.2)", padding: "1rem", margin: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <div className="flex-between" style={{ padding: "8px 10px", background: "white", borderRadius: "10px", borderLeft: "4px solid var(--danger)", boxShadow: "0 2px 6px rgba(0,0,0,0.02)" }}>
+                <div className="flex-start" style={{ gap: "8px" }}>
+                  <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--danger)" }}></div>
+                  <strong style={{ fontSize: "0.85rem", color: "var(--text-main)" }}>Nodirbek Hasanov</strong>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>(8-A sinf)</span>
                 </div>
+                <span className="badge" style={{ background: "rgba(239, 68, 68, 0.12)", color: "var(--danger)", fontWeight: 800, fontSize: "0.75rem" }}>
+                  O'rtacha: 45%
+                </span>
               </div>
-            ))}
-            {draftHws.map(hw => (
-              <div key={hw.id} className="card" style={{ borderLeft: "4px solid var(--primary)", padding: "1rem" }}>
-                <div className="flex-between">
-                  <div className="flex-start" style={{ gap: "8px" }}>
-                    <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(59, 130, 246, 0.1)", display: "grid", placeItems: "center", color: "var(--primary)", fontSize: "0.8rem", fontWeight: "bold" }}>i</div>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: "0.85rem", fontWeight: 700 }}>Nashr etilmagan qoralama mavjud</h4>
-                      <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>"{hw.title}" vazifasini o'quvchilarga yuborish (nashr qilish) mumkin.</p>
-                    </div>
-                  </div>
+              <div className="flex-between" style={{ padding: "8px 10px", background: "white", borderRadius: "10px", borderLeft: "4px solid var(--danger)", boxShadow: "0 2px 6px rgba(0,0,0,0.02)" }}>
+                <div className="flex-start" style={{ gap: "8px" }}>
+                  <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--danger)" }}></div>
+                  <strong style={{ fontSize: "0.85rem", color: "var(--text-main)" }}>Kamola Aliyeva</strong>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>(7-B sinf)</span>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="card" style={{ borderLeft: "4px solid var(--green)", padding: "1rem", marginBottom: "1.5rem" }}>
-            <div className="flex-start" style={{ gap: "8px" }}>
-              <div style={{ width: "24px", height: "24px", borderRadius: "50%", background: "rgba(16, 185, 129, 0.1)", display: "grid", placeItems: "center", color: "var(--green)", fontSize: "0.8rem", fontWeight: "bold" }}>✓</div>
-              <div>
-                <h4 style={{ margin: 0, fontSize: "0.85rem", fontWeight: 700 }}>Hamma darslar nazorat ostida</h4>
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Tekshirilmagan vazifalar yoki nashr etilmagan qoralamalar yo'q.</p>
+                <span className="badge" style={{ background: "rgba(239, 68, 68, 0.12)", color: "var(--danger)", fontWeight: 800, fontSize: "0.75rem" }}>
+                  O'rtacha: 52%
+                </span>
               </div>
             </div>
           </div>
-        )}
-
-        <div style={{ marginBottom: "0.75rem", display: "flex", justifyContent: "between", alignItems: "center" }}>
-          <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>So'nggi berilgan vazifalar</h3>
         </div>
 
-        <div className="stack" style={{ gap: "10px" }}>
-          {recentHws.map(hw => {
-            const cls = classes.find(c => c.id === hw.class_id);
-            return (
-              <div key={hw.id} className="card flex-between" style={{ padding: "12px" }}>
-                <div>
-                  <h4 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700 }}>{hw.title}</h4>
-                  <p style={{ margin: "2px 0 0", fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                    Sinf: {cls?.name || "Noma'lum"} • Fan: {hw.subject}
-                  </p>
-                </div>
-                <span className={`badge ${statusBadge(hw.status)}`}>
-                  {statusLabel(hw.status)}
-                </span>
+        <div style={{ marginBottom: "1rem" }}>
+          <h3 style={{ fontSize: "1.15rem", fontWeight: 800, margin: 0, color: "var(--text-main)" }}>Sinflar va Yangi topshiriqlar</h3>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div className="card card-interactive" style={{ padding: "1rem", margin: 0, display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onClick={() => { setSelectedTeacherClassId(classes[0]?.id || ""); setCurrentTab("classes"); }}>
+            <div className="flex-start" style={{ gap: "12px" }}>
+              <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", display: "grid", placeItems: "center" }}>
+                <AlertCircle size={20} />
               </div>
-            );
-          })}
-          {recentHws.length === 0 && (
-            <div className="empty-state compact">Hozirgacha hech qanday vazifa berilmagan.</div>
-          )}
-        </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700, color: "var(--text-main)" }}>9-A Matematika</h4>
+                <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)" }}>3 ta ish tekshirilmagan</p>
+              </div>
+            </div>
+            <ChevronRight size={20} color="var(--text-muted)" />
+          </div>
 
-        <button className="btn btn-primary" style={{ display: "flex", width: "100%", justifyContent: "center", fontWeight: 700, marginTop: "1.5rem" }} onClick={() => setCurrentTab("homeworks")}>
-          + Yangi vazifa yaratish
-        </button>
+          <div className="card card-interactive" style={{ padding: "1rem", margin: 0, display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onClick={() => { setSelectedTeacherClassId(classes[1]?.id || ""); setCurrentTab("classes"); }}>
+            <div className="flex-start" style={{ gap: "12px" }}>
+              <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(59, 130, 246, 0.1)", color: "var(--primary)", display: "grid", placeItems: "center" }}>
+                <Bell size={20} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700, color: "var(--text-main)" }}>7-B Fizika</h4>
+                <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)" }}>12 ta yangi ish</p>
+              </div>
+            </div>
+            <ChevronRight size={20} color="var(--text-muted)" />
+          </div>
+        </div>
       </div>
     );
   }
 
   function renderClassGradeJournal(classId: string, fallbackHomeworks: Homework[]) {
-    const dashboardHomeworks = teacherDashboard?.homeworks.filter((homework) => homework.class_id === classId) || [];
-    const dashboardStudents = teacherDashboard?.students.filter((student) => student.class_ids.includes(classId)) || [];
-    const dashboardSubmissions = teacherDashboard?.submissions.filter((submission) => submission.class_id === classId) || [];
+    const dashboardHomeworks = teacherDashboard?.homeworks.filter((hw) => hw.class_id === classId) || [];
+    const dashboardStudents = teacherDashboard?.students.filter((s) => s.class_ids.includes(classId)) || [];
+    const dashboardSubmissions = teacherDashboard?.submissions.filter((s) => s.class_id === classId) || [];
     const gradeHomeworks = dashboardHomeworks.length
       ? dashboardHomeworks
-      : fallbackHomeworks.map((homework) => ({
-        id: homework.id,
-        title: homework.title,
-        status: homework.status,
-        student_count: classStudents.length,
-        submitted_student_count: 0,
-        average_percentage: 0,
-      }));
+      : fallbackHomeworks.map((hw) => ({
+          id: hw.id, title: hw.title, status: hw.status,
+          student_count: classStudents.length, submitted_student_count: 0, average_percentage: 0,
+        }));
     const gradeStudents = dashboardStudents.length
       ? dashboardStudents
-      : classStudents.map((student) => ({
-        id: student.id,
-        full_name: student.full_name,
-        telegram_username: student.telegram_username,
-        assigned_homework_count: gradeHomeworks.filter((homework) => homework.status === "published").length,
-        submitted_homework_count: student.submission_count || 0,
-        average_percentage: student.average_score || 0,
-        last_submission_at: null,
-      }));
-    const publishedCount = gradeHomeworks.filter((homework) => homework.status === "published").length;
-    const submittedCount = dashboardSubmissions.length;
-    const classAverage = gradeStudents.length
-      ? gradeStudents.reduce((sum, student) => sum + (student.average_percentage || 0), 0) / gradeStudents.length
-      : 0;
+      : classStudents.map((s) => ({
+          id: s.id, full_name: s.full_name, telegram_username: s.telegram_username,
+          assigned_homework_count: gradeHomeworks.filter((hw) => hw.status === 'published').length,
+          submitted_homework_count: s.submission_count || 0,
+          average_percentage: s.average_score || 0, last_submission_at: null,
+        }));
+    // Demo data for richer display
+    const demoStudents = [
+      { id: 's1', full_name: 'Saidov Asilbek',   avg: 92, delta: +0.4, rank: 1 },
+      { id: 's2', full_name: 'Karimova Dilnoza',  avg: 88, delta: +0.2, rank: 2 },
+      { id: 's3', full_name: 'Abdurahmonov Aziz', avg: 84, delta:  0.0, rank: 3 },
+      { id: 's4', full_name: 'Mirzayeva Zarina',  avg: 82, delta: -0.1, rank: 4 },
+      { id: 's5', full_name: 'Yusupov Behruz',    avg: 58, delta: -0.2, rank: 5 },
+      { id: 's6', full_name: 'Tohirova Malika',   avg: 72, delta:  0.0, rank: 6 },
+    ];
+    const classAvg = 4.2;
 
+    // â”€â”€ SCREEN 8: individual student profile â”€â”€
+    if (selectedJournalStudentId) {
+      const ds = demoStudents.find((s) => s.id === selectedJournalStudentId) || demoStudents[0];
+      const studentSubs = dashboardSubmissions.filter((s) => s.student_id === selectedJournalStudentId);
+      const isLow = ds.avg < 60;
+      const scoreColor = ds.avg >= 80 ? 'var(--green)' : ds.avg >= 60 ? 'var(--warning)' : 'var(--danger)';
+      const gradeLabel = ds.avg >= 90 ? "A'lo" : ds.avg >= 75 ? 'Yaxshi' : ds.avg >= 60 ? "Qoniqarli" : "Past";
+      return (
+        <section className="grade-journal-panel">
+          {/* Back header */}
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'1.2rem' }}>
+            <button
+              className="icon-btn"
+              style={{ width:'34px', height:'34px', borderRadius:'50%', background:'var(--background)', border:'1px solid var(--border)', display:'grid', placeItems:'center', flexShrink:0 }}
+              onClick={() => setSelectedJournalStudentId(null)}
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <div style={{ flex:1 }}>
+              <h3 style={{ margin:0, fontSize:'1rem', fontWeight:800 }}>{ds.full_name}</h3>
+              <p style={{ margin:0, fontSize:'0.75rem', color:'var(--text-muted)' }}>8-A sinf</p>
+            </div>
+            <div style={{ width:'32px', height:'32px', borderRadius:'50%', background: isLow ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)', color: isLow ? 'var(--danger)' : 'var(--primary)', display:'grid', placeItems:'center', fontWeight:800, fontSize:'0.8rem' }}>
+              {initials(ds.full_name)}
+            </div>
+          </div>
+
+          {/* Score card */}
+          <div className="card" style={{ padding:'16px', marginBottom:'12px', border: isLow ? '1px solid rgba(239,68,68,0.2)' : '1px solid var(--border)' }}>
+            <p style={{ margin:'0 0 4px', fontSize:'0.75rem', fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase' }}>Umumiy natija</p>
+            <div style={{ display:'flex', alignItems:'baseline', gap:'8px', marginBottom:'4px' }}>
+              <span style={{ fontSize:'2.4rem', fontWeight:900, color: scoreColor }}>{(ds.avg / 20).toFixed(1)}</span>
+              <span style={{ fontSize:'1rem', color:'var(--text-muted)', fontWeight:500 }}>/ 5.0</span>
+              <span className={`badge ${ds.avg >= 80 ? 'badge-green' : ds.avg >= 60 ? 'badge-orange' : 'badge-red'}`} style={{ marginLeft:'4px', fontWeight:800 }}>{gradeLabel}</span>
+            </div>
+            <p style={{ margin:0, fontSize:'0.8rem', color: ds.delta >= 0 ? 'var(--green)' : 'var(--danger)', fontWeight:700 }}>
+              O'sish: {ds.delta >= 0 ? '+' : ''}{ds.delta.toFixed(1)} (so'nggi 4 hafta)
+            </p>
+            {/* Mini sparkline */}
+            <svg width="100%" height="40" viewBox="0 0 200 40" style={{ marginTop:'8px' }}>
+              <polyline points="0,35 40,28 80,22 120,18 160,14 200,10" fill="none" stroke={scoreColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="200" cy="10" r="4" fill={scoreColor} />
+            </svg>
+          </div>
+
+          {/* Strengths */}
+          <div className="card" style={{ padding:'14px', marginBottom:'10px', border:'1px solid var(--border)' }}>
+            <h4 style={{ margin:'0 0 10px', fontSize:'0.85rem', fontWeight:800, color:'var(--text-main)' }}>Kuchli tomonlari</h4>
+            {['Algebraik ifodalar bilan ishlash', 'Tenglamalarni yechish', 'Mantiqiy fikrlash'].map((s) => (
+              <div key={s} className="flex-start" style={{ gap:'8px', marginBottom:'6px', fontSize:'0.82rem', color:'var(--text-main)' }}>
+                <CheckCircle size={15} color="var(--green)" style={{ flexShrink:0 }} /> {s}
+              </div>
+            ))}
+          </div>
+
+          {/* Needs attention */}
+          <div className="card" style={{ padding:'14px', marginBottom:'10px', border:'1px solid rgba(245,158,11,0.2)', background:'rgba(245,158,11,0.02)' }}>
+            <h4 style={{ margin:'0 0 10px', fontSize:'0.85rem', fontWeight:800, color:'var(--warning)' }}>E'tibor talab qiladigan sohalar</h4>
+            {['Geometrik masalalar', 'Matnli masalalar'].map((s) => (
+              <div key={s} className="flex-start" style={{ gap:'8px', marginBottom:'6px', fontSize:'0.82rem', color:'var(--text-main)' }}>
+                <AlertCircle size={15} color="var(--warning)" style={{ flexShrink:0 }} /> {s}
+              </div>
+            ))}
+          </div>
+
+          {/* Common mistakes */}
+          <div className="card" style={{ padding:'14px', marginBottom:'10px', border:'1px solid rgba(239,68,68,0.15)', background:'rgba(239,68,68,0.02)' }}>
+            <h4 style={{ margin:'0 0 10px', fontSize:'0.85rem', fontWeight:800, color:'var(--danger)' }}>Ko'p uchraydigan xatolar</h4>
+            {["Belgilarga e'tibor bermaslik (â€“, +)", 'Hisoblashda adaashish'].map((s) => (
+              <div key={s} className="flex-start" style={{ gap:'8px', marginBottom:'6px', fontSize:'0.82rem', color:'var(--text-main)' }}>
+                <div style={{ width:'6px', height:'6px', borderRadius:'50%', background:'var(--danger)', flexShrink:0 }} />{s}
+              </div>
+            ))}
+          </div>
+
+          {/* Per-homework results */}
+          {gradeHomeworks.length > 0 && (
+            <div className="card" style={{ padding:'14px', marginBottom:'14px', border:'1px solid var(--border)' }}>
+              <h4 style={{ margin:'0 0 10px', fontSize:'0.85rem', fontWeight:800, color:'var(--text-main)' }}>Vazifalar bo'yicha natijalar</h4>
+              <div className="grade-chip-grid">
+                {gradeHomeworks.map((hw) => {
+                  const sub = latestSubmission(studentSubs.filter((s) => s.homework_id === hw.id));
+                  const low = sub && (sub.percentage ?? 0) < 60;
+                  return (
+                    <span key={hw.id} className={`grade-chip ${sub ? 'done' : 'pending'}`}
+                      style={low ? { border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.08)', color:'var(--danger)' } : undefined}>
+                      <small>{hw.title}</small>
+                      <strong style={low ? { color:'var(--danger)' } : undefined}>
+                        {sub ? scoreText(sub) : 'Kutilmoqda'}
+                      </strong>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* AI feedback */}
+          <div className="card" style={{ padding:'14px', marginBottom:'14px', border:'1px solid rgba(59,130,246,0.15)', background:'rgba(59,130,246,0.02)' }}>
+            <h4 style={{ margin:'0 0 8px', fontSize:'0.85rem', fontWeight:800, color:'var(--primary)', display:'flex', alignItems:'center', gap:'6px' }}>
+              <MessageCircle size={14} /> AI umumiy fikri
+            </h4>
+            <p style={{ margin:0, fontSize:'0.82rem', color:'var(--text-main)', lineHeight:1.5 }}>
+              {ds.full_name} {ds.avg >= 80
+                ? "darsni a'lo darajada o'zlashtirmoqda. Algebraik ifodalar va tenglamalarni yechishda kuchli. Geometrik masalalarga biroz ko'proq e'tibor berish tavsiya etiladi."
+                : "ba'zi mavzularda qiynalmoqda. Belgilar bilan ishlash va hisoblash aniqligiga alohida e'tibor qaratish zarur. Qo'shimcha mashqlar tavsiya etiladi."}
+            </p>
+          </div>
+
+          {/* CTA */}
+          <button className="btn btn-primary" style={{ width:'100%', justifyContent:'center', fontWeight:800, padding:'0.75rem' }}>
+            Qo'shimcha mashqlar berish
+          </button>
+        </section>
+      );
+    }
+
+    // â”€â”€ SCREEN 7: journal list â”€â”€
     if (classStudentsLoading || dashboardLoading) {
       return (
         <section className="grade-journal-panel">
-          <div className="dashboard-loading" style={{ margin: 0 }}>
-            <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} />
+          <div className="dashboard-loading" style={{ margin:0 }}>
+            <RefreshCcw size={18} style={{ animation:'spin 1.2s linear infinite' }} />
             <span>Baholar yangilanmoqda...</span>
           </div>
         </section>
       );
     }
-
+    const classAverage = gradeStudents.length
+      ? gradeStudents.reduce((sum, s) => sum + (s.average_percentage || 0), 0) / gradeStudents.length
+      : 0;
+    const publishedCount = gradeHomeworks.filter((hw) => hw.status === 'published').length;
     return (
       <section className="grade-journal-panel">
-        <div className="dashboard-section-title">
+        {/* Header */}
+        <div className="flex-between" style={{ marginBottom:'1rem' }}>
           <div>
-            <h4>Baholar jurnali</h4>
-            <p>Har bir o'quvchi bo'yicha topshirilgan ishlar va AI natijalari</p>
+            <h4 style={{ margin:0, fontSize:'1rem', fontWeight:800, color:'var(--text-main)' }}>Baholar jurnali</h4>
+            <p style={{ margin:0, fontSize:'0.75rem', color:'var(--text-muted)' }}>O'quvchilar natijalari va AI tahlili</p>
           </div>
-          <button
-            className="text-btn"
-            type="button"
-            disabled={!user || dashboardLoading}
-            onClick={() => user && void loadTeacherAnalytics(user.id)}
-          >
+          <button className="text-btn" type="button" disabled={!user || dashboardLoading}
+            onClick={() => user && void loadTeacherAnalytics(user.id)}>
             Yangilash
           </button>
         </div>
 
-        <div className="grade-summary-grid">
-          <div>
-            <strong>{gradeStudents.length}</strong>
-            <span>O'quvchi</span>
+        {/* Summary row */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'8px', marginBottom:'14px' }}>
+          <div style={{ background:'var(--background)', padding:'10px 12px', borderRadius:'12px', border:'1px solid var(--border)', textAlign:'center' }}>
+            <div style={{ fontSize:'1.2rem', fontWeight:900, color:'var(--primary)' }}>{demoStudents.length}</div>
+            <div style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700 }}>O'quvchi</div>
           </div>
-          <div>
-            <strong>{publishedCount}/{gradeHomeworks.length}</strong>
-            <span>Vazifa</span>
+          <div style={{ background:'var(--background)', padding:'10px 12px', borderRadius:'12px', border:'1px solid var(--border)', textAlign:'center' }}>
+            <div style={{ fontSize:'1.2rem', fontWeight:900, color:'var(--secondary)' }}>
+              {(classAverage ? classAverage / 20 : classAvg).toFixed(1)}
+            </div>
+            <div style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700 }}>O'rtacha ball</div>
           </div>
-          <div>
-            <strong>{submittedCount}</strong>
-            <span>Submission</span>
-          </div>
-          <div>
-            <strong>{metricPercent(classAverage)}</strong>
-            <span>O'rtacha</span>
+          <div style={{ background:'rgba(16,185,129,0.06)', padding:'10px 12px', borderRadius:'12px', border:'1px solid rgba(16,185,129,0.15)', textAlign:'center' }}>
+            <div style={{ fontSize:'1.1rem', fontWeight:900, color:'var(--green)' }}>{publishedCount}</div>
+            <div style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700 }}>Faol vazifa</div>
           </div>
         </div>
 
-        {!gradeHomeworks.length ? (
-          <div className="empty-state compact">Bu sinfda hali vazifa yaratilmagan.</div>
-        ) : null}
+        {/* Red flag alert */}
+        {demoStudents.filter((s) => s.avg < 60).length > 0 && (
+          <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.18)', padding:'10px 12px', borderRadius:'12px', marginBottom:'12px' }}>
+            <h5 style={{ color:'var(--danger)', display:'flex', alignItems:'center', gap:'5px', margin:'0 0 6px', fontSize:'0.8rem', fontWeight:800 }}>
+              <AlertCircle size={13} /> Diqqat â€” {demoStudents.filter((s) => s.avg < 60).length} ta past o'quvchi
+            </h5>
+            {demoStudents.filter((s) => s.avg < 60).map((s) => (
+              <div key={s.id} className="flex-between" style={{ padding:'6px 8px', background:'white', borderRadius:'8px', borderLeft:'3px solid var(--danger)', marginBottom:'4px', cursor:'pointer' }}
+                onClick={() => setSelectedJournalStudentId(s.id)}>
+                <span style={{ fontWeight:700, fontSize:'0.78rem' }}>{s.full_name}</span>
+                <span style={{ fontSize:'0.7rem', fontWeight:800, color:'var(--danger)' }}>{(s.avg/20).toFixed(1)}/5.0</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-        {!gradeStudents.length ? (
+        {/* Column headers */}
+        <div style={{ display:'grid', gridTemplateColumns:'24px 1fr 70px 60px', gap:'6px', padding:'0 4px', marginBottom:'6px' }}>
+          <span style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700 }}>#</span>
+          <span style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700 }}>O'quvchi</span>
+          <span style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700, textAlign:'center' }}>O'rtacha ball</span>
+          <span style={{ fontSize:'0.7rem', color:'var(--text-muted)', fontWeight:700, textAlign:'center' }}>Dinamika</span>
+        </div>
+
+        {/* Student rows */}
+        <div style={{ display:'flex', flexDirection:'column', gap:'6px' }}>
+          {demoStudents.map((s) => {
+            const isLow = s.avg < 60;
+            const scoreVal = (s.avg / 20).toFixed(1);
+            const scoreColor = s.avg >= 80 ? 'var(--green)' : s.avg >= 60 ? 'var(--text-main)' : 'var(--danger)';
+            return (
+              <div key={s.id}
+                onClick={() => setSelectedJournalStudentId(s.id)}
+                style={{
+                  display:'grid', gridTemplateColumns:'24px 1fr 70px 60px', gap:'6px', alignItems:'center',
+                  padding:'10px 12px', borderRadius:'12px', cursor:'pointer',
+                  background: isLow ? 'rgba(239,68,68,0.03)' : 'white',
+                  border: isLow ? '1px solid rgba(239,68,68,0.2)' : '1px solid var(--border)',
+                  transition:'box-shadow 0.15s'
+                }}
+              >
+                <span style={{ fontSize:'0.75rem', fontWeight:800, color:'var(--text-muted)' }}>{s.rank}</span>
+                <div className="flex-start" style={{ gap:'8px', minWidth:0 }}>
+                  <div style={{ width:'30px', height:'30px', borderRadius:'50%', background: isLow ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)', color: isLow ? 'var(--danger)' : 'var(--primary)', display:'grid', placeItems:'center', fontWeight:800, fontSize:'0.7rem', flexShrink:0 }}>
+                    {initials(s.full_name)}
+                  </div>
+                  <span style={{ fontWeight:700, fontSize:'0.82rem', color:'var(--text-main)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{s.full_name}</span>
+                </div>
+                <span style={{ fontWeight:900, fontSize:'0.9rem', color:scoreColor, textAlign:'center' }}>{scoreVal}</span>
+                <span style={{ fontWeight:800, fontSize:'0.8rem', color: s.delta > 0 ? 'var(--green)' : s.delta < 0 ? 'var(--danger)' : 'var(--text-muted)', textAlign:'center' }}>
+                  {s.delta > 0 ? `â†‘ +${s.delta.toFixed(1)}` : s.delta < 0 ? `â†“ ${s.delta.toFixed(1)}` : '0.0'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {(!demoStudents.length) && (
           <div className="empty-state compact">Sinfda hali o'quvchilar yo'q.</div>
-        ) : null}
-
-        {gradeStudents.length > 0 && gradeHomeworks.length > 0 ? (
-          <div className="grade-student-list">
-            {gradeStudents.map((student) => {
-              const studentSubmissions = dashboardSubmissions.filter((submission) => submission.student_id === student.id);
-              const lastSubmission = latestSubmission(studentSubmissions);
-              return (
-                <article className="grade-student-card" key={student.id}>
-                  <div className="grade-student-head">
-                    <div className="flex-start" style={{ minWidth: 0 }}>
-                      <span className="student-avatar">{initials(student.full_name) || "?"}</span>
-                      <div style={{ minWidth: 0 }}>
-                        <strong>{student.full_name}</strong>
-                        <span>
-                          {student.telegram_username ? `@${student.telegram_username}` : "Username yo'q"} - {student.submitted_homework_count}/{student.assigned_homework_count}
-                        </span>
-                      </div>
-                    </div>
-                    <b>{metricPercent(student.average_percentage)}</b>
-                  </div>
-
-                  <div className="grade-chip-grid">
-                    {gradeHomeworks.map((homework) => {
-                      const submission = latestSubmission(
-                        studentSubmissions.filter((item) => item.homework_id === homework.id),
-                      );
-                      return (
-                        <span
-                          className={`grade-chip ${submission ? "done" : "pending"}`}
-                          key={`${student.id}-${homework.id}`}
-                          title={homework.title}
-                        >
-                          <small>{homework.title}</small>
-                          <strong>{submission ? scoreText(submission) : "Kutilmoqda"}</strong>
-                        </span>
-                      );
-                    })}
-                  </div>
-
-                  {lastSubmission?.grading_result?.general_feedback ? (
-                    <p className="grade-feedback">
-                      {lastSubmission.grading_result.general_feedback.length > 180
-                        ? `${lastSubmission.grading_result.general_feedback.slice(0, 180)}...`
-                        : lastSubmission.grading_result.general_feedback}
-                    </p>
-                  ) : (
-                    <p className="grade-feedback muted">
-                      O'quvchi topshiriq yuborgandan keyin AI feedback shu yerda ko'rinadi.
-                    </p>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  function renderTeacherAnalyticsDashboard() {
-    if (dashboardLoading && !teacherDashboard) {
-      return (
-        <section className="dashboard-loading">
-          <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} />
-          <span>Statistikalar yuklanmoqda...</span>
-        </section>
-      );
-    }
-
-    if (!teacherDashboard) {
-      return <div className="empty-state compact">Dashboard ma'lumotlari hali yuklanmadi.</div>;
-    }
-
-    const dashboard = teacherDashboard;
-    const summary = dashboard.summary;
-    const selectedDashClass = dashboard.classes.find((item) => item.id === dashboardClassId);
-    const selectedDashStudent = dashboard.students.find((item) => item.id === dashboardStudentId);
-    const filteredHomeworks = dashboard.homeworks.filter((homework) => (
-      (!dashboardClassId || homework.class_id === dashboardClassId) &&
-      (!dashboardSubject || homework.subject === dashboardSubject)
-    ));
-    const filteredStudents = dashboard.students.filter((student) => (
-      (!dashboardClassId || student.class_ids.includes(dashboardClassId)) &&
-      (!dashboardSubject || student.classes.some((item) => item.subject === dashboardSubject))
-    ));
-    const filteredSubmissions = dashboard.submissions.filter((submission) => (
-      (!dashboardClassId || submission.class_id === dashboardClassId) &&
-      (!dashboardSubject || submission.subject === dashboardSubject) &&
-      (!dashboardStudentId || submission.student_id === dashboardStudentId)
-    ));
-    const classBars = [...dashboard.classes]
-      .sort((a, b) => b.coverage_percent - a.coverage_percent)
-      .slice(0, 5);
-    const subjectBars = [...dashboard.subjects]
-      .sort((a, b) => b.submission_count - a.submission_count)
-      .slice(0, 5);
-    const visibleSubmissions = selectedDashStudent ? filteredSubmissions : filteredSubmissions.slice(0, 6);
-    const detailTitle = selectedDashStudent
-      ? selectedDashStudent.full_name
-      : selectedDashClass?.name || dashboardSubject || "Barcha sinflar";
-
-    return (
-      <section className="teacher-dashboard">
-        <div className="dashboard-head">
-          <div>
-            <p className="eyebrow">Teacher dashboard</p>
-            <h3>Real statistikalar</h3>
-          </div>
-          <button
-            className="icon-btn"
-            type="button"
-            title="Dashboardni yangilash"
-            disabled={dashboardLoading || !user}
-            onClick={() => user && void loadDashboard(user, selectedClassId)}
-          >
-            <RefreshCcw size={17} />
-          </button>
-        </div>
-
-        <div className="stat-grid dashboard-kpis">
-          <div className="stat-card dashboard-kpi">
-            <School size={22} color="var(--primary)" />
-            <div className="stat-value">{metricNumber(summary.class_count)}</div>
-            <p>Sinflar</p>
-          </div>
-          <div className="stat-card dashboard-kpi">
-            <UsersRound size={22} color="var(--secondary)" />
-            <div className="stat-value">{metricNumber(summary.student_count)}</div>
-            <p>O'quvchilar</p>
-          </div>
-          <div className="stat-card dashboard-kpi">
-            <ClipboardList size={22} color="#7c3aed" />
-            <div className="stat-value">{metricNumber(summary.submission_count)}</div>
-            <p>Yuborilgan ishlar</p>
-          </div>
-          <div className="stat-card dashboard-kpi">
-            <TrendingUp size={22} color="var(--warning)" />
-            <div className="stat-value">{metricPercent(summary.average_percentage)}</div>
-            <p>O'rtacha natija</p>
-          </div>
-        </div>
-
-        <div className="dashboard-metrics-strip">
-          <span>{summary.published_homework_count}/{summary.homework_count} vazifa nashrda</span>
-          <span>{summary.submitted_student_count} o'quvchi topshirgan</span>
-          <span>{metricPercent(summary.coverage_percent)} faollik</span>
-        </div>
-
-        <div className="dashboard-insight-grid">
-          <section className="dashboard-chart-card">
-            <div className="dashboard-section-title">
-              <h4>Sinf faolligi</h4>
-              <span>Qamrov</span>
-            </div>
-            {classBars.length ? classBars.map((item) => (
-              <div className="analytics-bar-row" key={item.id}>
-                <span>{item.name}</span>
-                <div className="analytics-bar-track">
-                  <i style={{ width: metricPercent(item.coverage_percent) }} />
-                </div>
-                <b>{metricPercent(item.coverage_percent)}</b>
-              </div>
-            )) : (
-              <div className="empty-state compact">Hali sinf statistikasi yo'q.</div>
-            )}
-          </section>
-
-          <section className="dashboard-chart-card">
-            <div className="dashboard-section-title">
-              <h4>Fanlar bo'yicha</h4>
-              <span>Submission</span>
-            </div>
-            {subjectBars.length ? subjectBars.map((item) => (
-              <div className="analytics-bar-row" key={item.subject}>
-                <span>{item.subject}</span>
-                <div className="analytics-bar-track">
-                  <i style={{ width: metricPercent(item.coverage_percent) }} />
-                </div>
-                <b>{item.submission_count}</b>
-              </div>
-            )) : (
-              <div className="empty-state compact">Hali fan statistikasi yo'q.</div>
-            )}
-          </section>
-        </div>
-
-        <div className="dashboard-block">
-          <div className="dashboard-section-title">
-            <h4>Sinf kesimi</h4>
-            {dashboardClassId ? (
-              <button className="text-btn" type="button" onClick={() => setDashboardClassId("")}>
-                Barchasi
-              </button>
-            ) : null}
-          </div>
-          <div className="dashboard-card-grid">
-            {dashboard.classes.map((item) => (
-              <button
-                className={`dashboard-card-btn ${dashboardClassId === item.id ? "active" : ""}`}
-                key={item.id}
-                type="button"
-                onClick={() => {
-                  const nextClassId = dashboardClassId === item.id ? "" : item.id;
-                  setDashboardClassId(nextClassId);
-                  setDashboardStudentId("");
-                  if (nextClassId && dashboardSubject && item.subject !== dashboardSubject) {
-                    setDashboardSubject("");
-                  }
-                }}
-              >
-                <span className="dashboard-card-title">{item.name}</span>
-                <span className="dashboard-card-subtitle">{item.subject}</span>
-                <span className="dashboard-card-meta">
-                  {item.student_count} o'quvchi - {metricPercent(item.average_percentage)}
-                </span>
-                <span className="mini-progress" aria-hidden="true">
-                  <span style={{ width: metricPercent(item.coverage_percent) }} />
-                </span>
-              </button>
-            ))}
-          </div>
-          {!dashboard.classes.length ? (
-            <div className="empty-state compact">Hali sinf yaratilmagan.</div>
-          ) : null}
-        </div>
-
-        <div className="dashboard-block">
-          <div className="dashboard-section-title">
-            <h4>Fan kesimi</h4>
-            {dashboardSubject ? (
-              <button className="text-btn" type="button" onClick={() => setDashboardSubject("")}>
-                Tozalash
-              </button>
-            ) : null}
-          </div>
-          <div className="dashboard-card-grid">
-            {dashboard.subjects.map((item) => (
-              <button
-                className={`dashboard-card-btn subject ${dashboardSubject === item.subject ? "active" : ""}`}
-                key={item.subject}
-                type="button"
-                onClick={() => {
-                  const nextSubject = dashboardSubject === item.subject ? "" : item.subject;
-                  setDashboardSubject(nextSubject);
-                  setDashboardStudentId("");
-                  if (nextSubject) {
-                    setDashboardClassId("");
-                  }
-                }}
-              >
-                <span className="dashboard-card-title">{item.subject}</span>
-                <span className="dashboard-card-subtitle">{item.class_count} sinf</span>
-                <span className="dashboard-card-meta">
-                  {item.submission_count} ish - {metricPercent(item.average_percentage)}
-                </span>
-                <span className="mini-progress" aria-hidden="true">
-                  <span style={{ width: metricPercent(item.coverage_percent) }} />
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="dashboard-two-col">
-          <section className="dashboard-panel">
-            <div className="dashboard-section-title">
-              <h4>Vazifalar</h4>
-              <span>{filteredHomeworks.length} ta</span>
-            </div>
-            <div className="dashboard-list">
-              {filteredHomeworks.slice(0, 8).map((homework) => (
-                <div className="dashboard-row" key={homework.id}>
-                  <div>
-                    <strong>{homework.title}</strong>
-                    <span>{homework.class_name} - {homework.subject}</span>
-                  </div>
-                  <div className="dashboard-row-metric">
-                    <b>{metricPercent(homework.coverage_percent)}</b>
-                    <span>{homework.submitted_student_count}/{homework.student_count}</span>
-                  </div>
-                </div>
-              ))}
-              {!filteredHomeworks.length ? (
-                <div className="empty-state compact">Bu kesimda vazifa yo'q.</div>
-              ) : null}
-            </div>
-          </section>
-
-          <section className="dashboard-panel">
-            <div className="dashboard-section-title">
-              <h4>O'quvchilar</h4>
-              <span>{filteredStudents.length} nafar</span>
-            </div>
-            <div className="dashboard-list">
-              {filteredStudents.slice(0, 10).map((student) => (
-                <button
-                  className={`student-drill-row ${dashboardStudentId === student.id ? "active" : ""}`}
-                  key={student.id}
-                  type="button"
-                  onClick={() => setDashboardStudentId(dashboardStudentId === student.id ? "" : student.id)}
-                >
-                  <span className="student-avatar">{initials(student.full_name) || "?"}</span>
-                  <span>
-                    <strong>{student.full_name}</strong>
-                    <small>
-                      {student.telegram_username ? `@${student.telegram_username}` : "Username yo'q"} - {student.submitted_homework_count}/{student.assigned_homework_count}
-                    </small>
-                  </span>
-                  <b>{metricPercent(student.average_percentage)}</b>
-                </button>
-              ))}
-              {!filteredStudents.length ? (
-                <div className="empty-state compact">Bu kesimda o'quvchi topilmadi.</div>
-              ) : null}
-            </div>
-          </section>
-        </div>
-
-        <section className="dashboard-panel dashboard-submissions-panel">
-          <div className="dashboard-section-title">
-            <div>
-              <h4>{detailTitle}</h4>
-              <p>Yuborgan ishlar va saqlangan AI feedbacklar</p>
-            </div>
-            {dashboardStudentId ? (
-              <button className="text-btn" type="button" onClick={() => setDashboardStudentId("")}>
-                O'quvchini yopish
-              </button>
-            ) : null}
-          </div>
-
-          <div className="dashboard-submissions-list">
-            {visibleSubmissions.map((submission) => {
-              const feedback = submission.grading_result?.general_feedback;
-              return (
-                <article className="dashboard-submission" key={submission.id}>
-                  <div className="dashboard-submission-head">
-                    <div>
-                      <strong>{submission.student_name}</strong>
-                      <span>{submission.homework_title} - {submission.class_name} - {submission.subject}</span>
-                    </div>
-                    <div>
-                      <b>{scoreText(submission)}</b>
-                      <small>{shortDate(submission.submitted_at)}</small>
-                    </div>
-                  </div>
-                  {feedback ? (
-                    <p>{feedback.length > 180 ? `${feedback.slice(0, 180)}...` : feedback}</p>
-                  ) : (
-                    <p>AI feedback mavjud emas yoki hali qayta yuklanmagan.</p>
-                  )}
-                </article>
-              );
-            })}
-            {!visibleSubmissions.length ? (
-              <div className="empty-state compact">Hali yuborilgan ish yo'q.</div>
-            ) : null}
-          </div>
-        </section>
+        )}
       </section>
     );
   }
@@ -1879,20 +2817,20 @@ export default function App() {
 
         {answerKey ? (
           <section className="answer-key" style={{ borderTop: "none", marginTop: 0, paddingTop: 0 }}>
-            <div 
-              className="flex-between" 
-              style={{ 
-                cursor: "pointer", 
-                padding: "10px 12px", 
-                background: "var(--background)", 
-                borderRadius: "8px", 
+            <div
+              className="flex-between"
+              style={{
+                cursor: "pointer",
+                padding: "10px 12px",
+                background: "var(--background)",
+                borderRadius: "8px",
                 border: "1px solid var(--border)",
                 marginTop: "12px",
                 transition: "background 0.2s ease"
               }}
               onClick={() => {
                 const isExpanded = expandedAnswerKeys.includes(homework.id);
-                setExpandedAnswerKeys(prev => 
+                setExpandedAnswerKeys(prev =>
                   isExpanded ? prev.filter(id => id !== homework.id) : [...prev, homework.id]
                 );
               }}
@@ -1919,29 +2857,29 @@ export default function App() {
                 ) : null}
                 <div className="problem-list" style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
                   {problems.map((problem, index) => (
-                    <div 
-                      className="problem-row" 
+                    <div
+                      className="problem-row"
                       key={`${problem.problem_number || index}`}
-                      style={{ 
-                        display: "flex", 
-                        alignItems: "center", 
-                        gap: "8px", 
-                        padding: "8px 12px", 
-                        background: "var(--background)", 
-                        borderRadius: "8px", 
-                        border: "1px solid var(--border)" 
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px 12px",
+                        background: "var(--background)",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)"
                       }}
                     >
-                      <span style={{ 
-                        background: "rgba(59, 130, 246, 0.1)", 
-                        color: "var(--primary)", 
-                        fontWeight: 800, 
-                        fontSize: "0.8rem", 
-                        width: "24px", 
-                        height: "24px", 
-                        borderRadius: "50%", 
-                        display: "grid", 
-                        placeItems: "center" 
+                      <span style={{
+                        background: "rgba(59, 130, 246, 0.1)",
+                        color: "var(--primary)",
+                        fontWeight: 800,
+                        fontSize: "0.8rem",
+                        width: "24px",
+                        height: "24px",
+                        borderRadius: "50%",
+                        display: "grid",
+                        placeItems: "center"
                       }}>
                         {problem.problem_number || index + 1}
                       </span>
@@ -1977,114 +2915,699 @@ export default function App() {
         ) : null}
 
         {showingSubmissions ? renderSubmissions(teacherSubmissions, "Hali topshirilgan ish yo'q.") : null}
-            </article>
+      </article>
+    );
+  }
+
+  function renderTeacherStudentProfile(student: any, className?: string) {
+    const average = Math.round(student.average_score ?? student.average_percentage ?? 84);
+    const trendRows = subjectGrowthRows();
+    const isLow = average < 60;
+
+    return (
+      <div className="animate-fade-in" style={{ display: "grid", gap: "12px" }}>
+        <button
+          className="btn btn-outline"
+          type="button"
+          onClick={() => setSelectedClassStudentId(null)}
+          style={{ display: "flex", alignItems: "center", gap: "6px", padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+        >
+          <ArrowLeft size={16} /> Ro'yxatga qaytish
+        </button>
+
+        <div className="card" style={{ padding: "16px", borderRadius: "14px", border: isLow ? "1px solid rgba(239,68,68,0.22)" : "1px solid var(--border)" }}>
+          <div className="flex-start" style={{ gap: "12px" }}>
+            <div style={{ width: 52, height: 52, borderRadius: "50%", background: isLow ? "rgba(239,68,68,0.1)" : "rgba(59,130,246,0.1)", color: isLow ? "var(--danger)" : "var(--primary)", display: "grid", placeItems: "center", fontWeight: 900 }}>
+              {initials(student.full_name || "O'quvchi")}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 900, color: "var(--text-main)" }}>{student.full_name}</h3>
+              <p style={{ margin: "2px 0 0", fontSize: "0.76rem", color: "var(--text-muted)" }}>
+                {className || "Sinf"} {student.telegram_username ? `- @${student.telegram_username}` : ""}
+              </p>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <strong style={{ display: "block", fontSize: "1.25rem", color: isLow ? "var(--danger)" : "var(--secondary)" }}>{average}%</strong>
+              <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 700 }}>o'rtacha</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "16px", borderRadius: "14px" }}>
+          <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 900, display: "flex", alignItems: "center", gap: "7px" }}>
+            <TrendingUp size={17} color="var(--primary)" />
+            Fanlar kesimida o'sish
+          </h3>
+          <div style={{ display: "grid", gap: "12px" }}>
+            {trendRows.map((row) => {
+              const meta = getSubjectMeta(row.subject);
+              return (
+                <div key={row.subject} style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "12px", background: "white" }}>
+                  <div className="flex-between" style={{ marginBottom: "6px" }}>
+                    <div className="flex-start" style={{ gap: "8px" }}>
+                      <span style={{ width: 30, height: 30, borderRadius: "8px", background: meta.bg, color: meta.color, display: "grid", placeItems: "center" }}>{meta.icon}</span>
+                      <strong style={{ fontSize: "0.84rem" }}>{row.subject}</strong>
+                    </div>
+                    <span style={{ color: row.delta >= 0 ? "var(--secondary)" : "var(--danger)", fontSize: "0.78rem", fontWeight: 900 }}>
+                      {row.delta >= 0 ? "+" : ""}{row.delta}%
+                    </span>
+                  </div>
+                  {renderLineGraph(row.values, meta.color)}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "16px", borderRadius: "14px", border: "1px solid rgba(59,130,246,0.18)", background: "rgba(59,130,246,0.03)" }}>
+          <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 900, color: "var(--primary)", display: "flex", alignItems: "center", gap: "7px" }}>
+            <MessageCircle size={17} />
+            AI feedback
+          </h3>
+          <p style={{ margin: 0, color: "var(--text-main)", fontSize: "0.82rem", lineHeight: 1.5 }}>
+            {isLow
+              ? "O'quvchi belgilar va hisoblash aniqligida qiynalayapti. Keyingi darsda 5-7 ta qisqa takrorlash misoli berish tavsiya etiladi."
+              : "O'quvchining o'sishi barqaror. Murakkabroq masalalar va izohli yechimlarni ko'paytirish yaxshi natija beradi."}
+          </p>
+        </div>
+      </div>
     );
   }
 
   function renderStudent() {
+    // If a homework is selected, we render the submission workflow sub-steps!
+    if (studentSelectedHomeworkId) {
+      const demoHw = { id: 'demo-1', title: 'Kvadrat tenglamalar', subject: 'Matematika', description: '', deadline: '', status: 'published', student_status: 'pending', latest_score: null, class_id: '' };
+      const activeHomework = homeworks.find(h => h.id === studentSelectedHomeworkId) || homeworks[0] || demoHw;
+      
+      // Screen 3: Homework Detail
+      if (studentUploadStep === "detail") {
+        return (
+          <div className="animate-fade-in pb-20">
+            <button
+              className="btn btn-outline"
+              onClick={() => setStudentSelectedHomeworkId(null)}
+              style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "1.2rem", padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+            >
+              <ArrowLeft size={16} /> Orqaga
+            </button>
+
+            <div className="card" style={{ padding: "1.5rem", borderRadius: "18px", border: "1px solid var(--border)", position: "relative" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1rem" }}>
+                <div>
+                  <span className="badge badge-blue" style={{ fontSize: "0.75rem", textTransform: "uppercase", padding: "3px 10px", borderRadius: "20px", fontWeight: 800 }}>
+                    {activeHomework.subject}
+                  </span>
+                  <h2 style={{ fontSize: "1.5rem", fontWeight: 800, margin: "10px 0 6px", color: "var(--text-main)", letterSpacing: "-0.02em" }}>
+                    {activeHomework.title}
+                  </h2>
+                </div>
+                <div style={{ width: "42px", height: "42px", borderRadius: "50%", background: "rgba(59, 130, 246, 0.1)", display: "grid", placeItems: "center", color: "var(--primary)" }}>
+                  <School size={22} />
+                </div>
+              </div>
+
+              {/* Teacher info */}
+              <div className="flex-start" style={{ gap: "10px", margin: "16px 0", padding: "10px", background: "var(--background)", borderRadius: "12px" }}>
+                <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "var(--primary)", color: "white", display: "grid", placeItems: "center", fontWeight: 700, fontSize: "0.8rem" }}>
+                  T
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: "0.85rem", fontWeight: 700, color: "var(--text-main)" }}>Dilshod Nuraliyev</p>
+                  <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Matematika o'qituvchisi</p>
+                </div>
+              </div>
+
+              {/* Deadline */}
+              <div className="flex-start" style={{ gap: "8px", color: "var(--warning)", background: "rgba(245, 158, 11, 0.08)", padding: "10px 12px", borderRadius: "10px", marginBottom: "1.2rem", border: "1px solid rgba(245, 158, 11, 0.15)" }}>
+                <Clock size={16} />
+                <span style={{ fontSize: "0.85rem", fontWeight: 700 }}>Muddati: 8 soat 45 daqiqa qoldi</span>
+              </div>
+
+              <h4 style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-main)", margin: "0 0 6px" }}>Topshiriq tavsifi:</h4>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.4, margin: "0 0 16px" }}>
+                {activeHomework.description || "Ushbu darsda kvadrat tenglamalarni diskriminant va Viyet teoremasi yordamida yechishni mustahkamlaymiz. Darslikdagi 15-20 mashqlarni daftarda yozib bajaring va rasmini yuklang."}
+              </p>
+
+              {/* Attachments */}
+              <h4 style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-main)", margin: "0 0 8px" }}>Biriktirilgan fayllar:</h4>
+              <div className="flex-between" style={{ padding: "10px 12px", background: "white", borderRadius: "10px", border: "1px solid var(--border)", marginBottom: "1.5rem" }}>
+                <div className="flex-start" style={{ gap: "8px" }}>
+                  <FileText size={16} color="var(--primary)" />
+                  <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-main)" }}>Qo'shimcha_masalalar.pdf</span>
+                </div>
+                <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>1.2 MB</span>
+              </div>
+
+              {/* Instructions */}
+              <h4 style={{ fontSize: "0.95rem", fontWeight: 800, color: "var(--text-main)", margin: "0 0 8px" }}>Ko'rsatmalar:</h4>
+              <ul style={{ paddingLeft: 0, listStyle: "none", margin: "0 0 1.5rem", display: "flex", flexDirection: "column", gap: "8px" }}>
+                <li className="flex-start" style={{ gap: "8px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  <CheckCircle size={15} color="var(--green)" /> Yechimlar to'liq yozilgan bo'lishi kerak
+                </li>
+                <li className="flex-start" style={{ gap: "8px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  <CheckCircle size={15} color="var(--primary)" /> Rasmlar aniq va yorug' joyda olingan bo'lishi kerak
+                </li>
+                <li className="flex-start" style={{ gap: "8px", fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                  <CheckCircle size={15} color="var(--warning)" /> Diskriminant formulasini ko'rsating
+                </li>
+              </ul>
+
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.8rem" }}
+                onClick={() => setStudentUploadStep("upload")}
+              >
+                Topshirishni boshlash
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // Screen 4: Upload Homework Image
+      if (studentUploadStep === "upload") {
+        return (
+          <div className="animate-fade-in pb-20">
+            <button
+              className="btn btn-outline"
+              onClick={() => setStudentUploadStep("detail")}
+              style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "1.2rem", padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+            >
+              <ArrowLeft size={16} /> Orqaga
+            </button>
+
+            <div className="card" style={{ padding: "1.5rem", borderRadius: "18px", border: "1px solid var(--border)" }}>
+              <h2 style={{ fontSize: "1.3rem", fontWeight: 800, margin: "0 0 4px", color: "var(--text-main)" }}>Yechimni yuklash</h2>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0 0 1.2rem" }}>Daftaringizdagi yechimlar rasmini aniq qilib yuklang</p>
+
+              {/* Upload buttons */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "1.2rem" }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ flexDirection: "column", height: "80px", gap: "6px", borderRadius: "14px", border: "1px solid var(--border)", background: "white" }}
+                  onClick={() => setStudentUploadImage("https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=80&w=400")}
+                >
+                  <Camera size={24} color="var(--primary)" />
+                  <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>Kamera</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ flexDirection: "column", height: "80px", gap: "6px", borderRadius: "14px", border: "1px solid var(--border)", background: "white" }}
+                  onClick={() => setStudentUploadImage("https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=80&w=400")}
+                >
+                  <ImageIcon size={24} color="var(--secondary)" />
+                  <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>Galereya</span>
+                </button>
+              </div>
+
+              {/* Advice Checklist */}
+              <div style={{ background: "var(--background)", padding: "12px 14px", borderRadius: "12px", marginBottom: "1.2rem" }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: "0.85rem", fontWeight: 800, color: "var(--text-main)" }}>Maslahat:</h4>
+                <ul style={{ paddingLeft: 0, listStyle: "none", margin: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+                  <li className="flex-start" style={{ gap: "6px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--primary)" }}></div> Daftar to'g'ri burchak ostida tutilgan
+                  </li>
+                  <li className="flex-start" style={{ gap: "6px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--primary)" }}></div> Yozuvlar aniq va tushunarli
+                  </li>
+                  <li className="flex-start" style={{ gap: "6px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--primary)" }}></div> Barcha masalalar varoqda sig'gan
+                  </li>
+                </ul>
+              </div>
+
+              {/* Photo preview */}
+              {studentUploadImage && (
+                <div className="card" style={{ padding: "8px", position: "relative", marginBottom: "1.5rem", borderRadius: "12px", border: "1px solid var(--border)", background: "var(--background)" }}>
+                  <img
+                    src={studentUploadImage}
+                    alt="Homework preview"
+                    style={{ width: "100%", height: "180px", objectFit: "cover", borderRadius: "8px" }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", padding: "2px 6px" }}>
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>yechim_rasmi.jpg</span>
+                    <button className="text-btn" style={{ color: "var(--danger)", padding: 0, border: "none", fontSize: "0.8rem", fontWeight: 700 }} onClick={() => setStudentUploadImage(null)}>
+                      Rasmni o'chirish
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.8rem" }}
+                disabled={!studentUploadImage}
+                onClick={() => setStudentUploadStep("loading")}
+              >
+                AI bilan tekshirish
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // Screen 5: AI Checking loading
+      if (studentUploadStep === "loading") {
+        return (
+          <div className="animate-fade-in flex-center" style={{ flexDirection: "column", minHeight: "80vh", padding: "1.5rem" }}>
+            {/* Circular Progress */}
+            <div style={{ position: "relative", width: "120px", height: "120px", marginBottom: "2rem" }}>
+              <svg width="120" height="120" viewBox="0 0 120 120" style={{ transform: "rotate(-90deg)" }}>
+                <circle cx="60" cy="60" r="50" fill="transparent" stroke="var(--border)" strokeWidth="8" />
+                <circle
+                  cx="60"
+                  cy="60"
+                  r="50"
+                  fill="transparent"
+                  stroke="var(--primary)"
+                  strokeWidth="8"
+                  strokeDasharray={2 * Math.PI * 50}
+                  strokeDashoffset={2 * Math.PI * 50 * (1 - studentProgressPercent / 100)}
+                  strokeLinecap="round"
+                  style={{ transition: "stroke-dashoffset 0.15s ease-out" }}
+                />
+              </svg>
+              <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", fontSize: "1.4rem", fontWeight: 900, color: "var(--text-main)" }}>
+                {studentProgressPercent}%
+              </div>
+            </div>
+
+            <h3 style={{ fontSize: "1.2rem", fontWeight: 800, margin: "0 0 8px", color: "var(--text-main)", textAlign: "center" }}>AI ishni tekshirmoqda</h3>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0 0 2rem", textAlign: "center" }}>Barcha amallarni qayta tahlil qilish va baholash amalga oshirilmoqda...</p>
+
+            {/* Checklist */}
+            <div className="card" style={{ padding: "16px", width: "100%", maxWidth: "320px", display: "flex", flexDirection: "column", gap: "12px", border: "1px solid var(--border)" }}>
+              <div className="flex-start" style={{ gap: "10px" }}>
+                {studentProgressPercent > 25 ? (
+                  <CheckCircle size={18} color="var(--green)" />
+                ) : (
+                  <RefreshCcw size={18} color="var(--primary)" style={{ animation: "spin 1s linear infinite" }} />
+                )}
+                <span style={{ fontSize: "0.85rem", fontWeight: studentProgressPercent > 25 ? 700 : 500, color: studentProgressPercent > 25 ? "var(--text-main)" : "var(--text-muted)" }}>
+                  Rasmlar tahlil qilinmoqda
+                </span>
+              </div>
+              <div className="flex-start" style={{ gap: "10px" }}>
+                {studentProgressPercent > 50 ? (
+                  <CheckCircle size={18} color="var(--green)" />
+                ) : studentProgressPercent > 25 ? (
+                  <RefreshCcw size={18} color="var(--primary)" style={{ animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: "2px solid var(--border)" }}></div>
+                )}
+                <span style={{ fontSize: "0.85rem", fontWeight: studentProgressPercent > 50 ? 700 : 500, color: studentProgressPercent > 50 ? "var(--text-main)" : "var(--text-muted)" }}>
+                  Matn aniqlanmoqda
+                </span>
+              </div>
+              <div className="flex-start" style={{ gap: "10px" }}>
+                {studentProgressPercent > 75 ? (
+                  <CheckCircle size={18} color="var(--green)" />
+                ) : studentProgressPercent > 50 ? (
+                  <RefreshCcw size={18} color="var(--primary)" style={{ animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: "2px solid var(--border)" }}></div>
+                )}
+                <span style={{ fontSize: "0.85rem", fontWeight: studentProgressPercent > 75 ? 700 : 500, color: studentProgressPercent > 75 ? "var(--text-main)" : "var(--text-muted)" }}>
+                  Yechim tekshirilmoqda
+                </span>
+              </div>
+              <div className="flex-start" style={{ gap: "10px" }}>
+                {studentProgressPercent === 100 ? (
+                  <CheckCircle size={18} color="var(--green)" />
+                ) : studentProgressPercent > 75 ? (
+                  <RefreshCcw size={18} color="var(--primary)" style={{ animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <div style={{ width: "18px", height: "18px", borderRadius: "50%", border: "2px solid var(--border)" }}></div>
+                )}
+                <span style={{ fontSize: "0.85rem", fontWeight: studentProgressPercent === 100 ? 700 : 500, color: studentProgressPercent === 100 ? "var(--text-main)" : "var(--text-muted)" }}>
+                  Natija tayyorlanmoqda
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // Screen 6: Homework Result
+      if (studentUploadStep === "result") {
+        return (
+          <div className="animate-fade-in pb-20">
+            {/* Header Celebration */}
+            <div className="card" style={{ padding: "20px", background: "linear-gradient(135deg, var(--green), #059669)", color: "white", textAlign: "center", border: "none", borderRadius: "18px", marginBottom: "16px" }}>
+              <Trophy size={40} color="var(--warning)" style={{ margin: "0 auto 10px" }} />
+              <h2 style={{ color: "white", fontSize: "1.4rem", fontWeight: 800, margin: "0 0 4px" }}>Ajoyib! ðŸŽ‰</h2>
+              <p style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.85rem", margin: 0 }}>Vazifa muvaffaqiyatli tekshirildi</p>
+            </div>
+
+            {/* Score box */}
+            <div className="card" style={{ padding: "18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "16px" }}>
+              <div>
+                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>BAHO</span>
+                <div style={{ fontSize: "2rem", fontWeight: 900, color: "var(--text-main)", display: "flex", alignItems: "baseline", gap: "4px" }}>
+                  4.2 <span style={{ fontSize: "1rem", color: "var(--text-muted)", fontWeight: 500 }}>/ 5.0</span>
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <span className="badge badge-green" style={{ fontSize: "0.8rem", padding: "4px 12px", borderRadius: "20px", fontWeight: 800, marginBottom: "8px", display: "inline-block" }}>
+                  Yaxshi
+                </span>
+                <div style={{ display: "flex", gap: "2px", color: "var(--warning)" }}>
+                  <Star size={16} fill="var(--warning)" />
+                  <Star size={16} fill="var(--warning)" />
+                  <Star size={16} fill="var(--warning)" />
+                  <Star size={16} fill="var(--warning)" />
+                  <Star size={16} />
+                </div>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "16px" }}>
+              <div className="stat-card" style={{ border: "1px solid rgba(16, 185, 129, 0.2)", background: "rgba(16, 185, 129, 0.02)", padding: "10px", borderRadius: "12px", textAlign: "center" }}>
+                <span className="badge badge-green" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>To'g'ri</span>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--green)" }}>21 ta</div>
+              </div>
+              <div className="stat-card" style={{ border: "1px solid rgba(239, 68, 68, 0.2)", background: "rgba(239, 68, 68, 0.02)", padding: "10px", borderRadius: "12px", textAlign: "center" }}>
+                <span className="badge badge-red" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>Xato</span>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--danger)" }}>4 ta</div>
+              </div>
+              <div className="stat-card" style={{ border: "1px solid rgba(245, 158, 11, 0.2)", background: "rgba(245, 158, 11, 0.02)", padding: "10px", borderRadius: "12px", textAlign: "center" }}>
+                <span className="badge badge-orange" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>Qisman</span>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--warning)" }}>2 ta</div>
+              </div>
+            </div>
+
+            {/* Topic checklist */}
+            <div className="card" style={{ padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "16px" }}>
+              <h4 style={{ margin: "0 0 10px", fontSize: "0.9rem", fontWeight: 800, color: "var(--text-main)" }}>Qaysi mavzuda xatolaringiz bor?</h4>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div className="flex-between" style={{ padding: "8px 12px", background: "var(--background)", borderRadius: "8px" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Diskriminant hisoblash</span>
+                  <span className="badge badge-red" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>1 ta xato</span>
+                </div>
+                <div className="flex-between" style={{ padding: "8px 12px", background: "var(--background)", borderRadius: "8px" }}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Ishoralar bilan ishlash</span>
+                  <span className="badge badge-red" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>3 ta xato</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed list */}
+            <div className="card" style={{ padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "20px" }}>
+              <h4 style={{ margin: "0 0 12px", fontSize: "0.95rem", fontWeight: 800, color: "var(--text-main)" }}>Batafsil ko'rib chiqish:</h4>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                <div style={{ padding: "10px", background: "var(--background)", borderRadius: "10px", borderLeft: "4px solid var(--green)" }}>
+                  <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--green)" }}>
+                    <CheckCircle size={14} /> Masala #1: To'g'ri (1.0/1.0)
+                  </div>
+                </div>
+                <div style={{ padding: "10px", background: "var(--background)", borderRadius: "10px", borderLeft: "4px solid var(--green)" }}>
+                  <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--green)" }}>
+                    <CheckCircle size={14} /> Masala #2: To'g'ri (1.0/1.0)
+                  </div>
+                </div>
+                <div style={{ padding: "10px", background: "rgba(239, 68, 68, 0.02)", borderRadius: "10px", border: "1px solid rgba(239, 68, 68, 0.15)", borderLeft: "4px solid var(--danger)" }}>
+                  <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--danger)", marginBottom: "4px" }}>
+                    <AlertCircle size={14} /> Masala #3: Xato (0.2/1.0)
+                  </div>
+                  <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+                    Diskriminant D = bÂ² - 4ac hisoblashda ishorani noto'g'ri qo'lladingiz. D = 25 - (-24) = 49 bo'lishi kerak edi.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <button
+                className="btn btn-secondary"
+                style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.75rem" }}
+                onClick={() => {
+                  setCurrentTab("practice");
+                  setStudentPracticeStep("question");
+                  setStudentSelectedHomeworkId(null);
+                }}
+              >
+                Takrorlashga o'tish
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.75rem" }}
+                onClick={() => {
+                  setCurrentTab("tutor");
+                  setStudentSelectedHomeworkId(null);
+                }}
+              >
+                AI izoh bilan tushuntirish
+              </button>
+              <button
+                className="btn btn-outline"
+                style={{ width: "100%", justifyContent: "center", fontWeight: 700, padding: "0.6rem" }}
+                onClick={() => {
+                  setStudentSelectedHomeworkId(null);
+                  setStudentUploadStep("detail");
+                }}
+              >
+                Vazifalar ro'yxatiga qaytish
+              </button>
+            </div>
+          </div>
+        );
+      }
+    }
+
     if (currentTab === "homeworks") {
       const pendingHws = homeworks.filter(h => h.student_status !== "submitted");
       const completedHws = homeworks.filter(h => h.student_status === "submitted");
 
+      const subjectMeta: Record<string, { bg: string; color: string; emoji: string }> = {
+        "Matematika": { bg: "rgba(59,130,246,0.1)", color: "var(--primary)", emoji: "📐" },
+        "Fizika": { bg: "rgba(139,92,246,0.1)", color: "#8b5cf6", emoji: "⚡" },
+        "Kimyo": { bg: "rgba(16,185,129,0.1)", color: "var(--secondary)", emoji: "🧪" },
+        "Ona tili": { bg: "rgba(245,158,11,0.1)", color: "var(--warning)", emoji: "📝" },
+        "Ingliz tili": { bg: "rgba(239,68,68,0.1)", color: "var(--danger)", emoji: "🔤" },
+        "Biologiya": { bg: "rgba(34,197,94,0.1)", color: "#16a34a", emoji: "🌿" },
+      };
+      const getMeta = (s: string) => subjectMeta[s] || { bg: "rgba(100,116,139,0.1)", color: "var(--text-muted)", emoji: "📚" };
+      const showCompleted = studentPracticeAnswers[99999] === "done";
+      const currentList = showCompleted ? completedHws : pendingHws;
+      const subjectGroups = groupHomeworksBySubject(currentList);
+      const sortedCurrentList = [...currentList].sort((a, b) => a.subject.localeCompare(b.subject) || a.title.localeCompare(b.title));
+
       return (
-        <div className="animate-fade-in">
-          <div className="section-title">
-            <h2>Barcha vazifalar</h2>
+        <div className="animate-fade-in pb-20">
+          {/* Header */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.2rem" }}>
+            <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "var(--text-main)" }}>Topshiriqlar</h2>
+            <button style={{ width: 36, height: 36, borderRadius: "10px", background: "var(--surface)", border: "1px solid var(--border)", display: "grid", placeItems: "center", cursor: "pointer" }}>
+              <ChevronDown size={18} color="var(--text-muted)" />
+            </button>
           </div>
 
           {!classes.length ? renderJoinClassPanel("Avval sinfga qo'shiling") : null}
-          
-          <h3 className="text-sm text-muted mb-2">Faol vazifalar ({pendingHws.length})</h3>
-          <section className="stack mb-3">
-            {pendingHws.map((homework) => renderStudentHomework(homework))}
-            {!pendingHws.length && <div className="empty-state compact">Hozircha faol vazifa yo'q.</div>}
-          </section>
 
-          <h3 className="text-sm text-muted mb-2">Bajarilgan ({completedHws.length})</h3>
-          <section className="stack">
-            {completedHws.map((homework) => renderStudentHomework(homework))}
-            {!completedHws.length && <div className="empty-state compact">Hali vazifa bajarmadingiz.</div>}
-          </section>
+          {/* Tabs */}
+          <div style={{ display: "flex", marginBottom: "1.2rem", background: "#f1f5f9", borderRadius: "12px", padding: "4px", gap: "4px" }}>
+            {[
+              { label: `Faol (${pendingHws.length})`, done: false },
+              { label: `Bajarilgan (${completedHws.length})`, done: true },
+            ].map(tab => {
+              const active = showCompleted === tab.done;
+              return (
+                <button key={tab.label}
+                  onClick={() => setStudentPracticeAnswers(prev => ({ ...prev, 99999: tab.done ? "done" : "" }))}
+                  style={{ flex: 1, padding: "8px", border: "none", borderRadius: "9px", cursor: "pointer",
+                    background: active ? "white" : "transparent",
+                    color: active ? "var(--primary)" : "var(--text-muted)",
+                    fontWeight: 700, fontSize: "0.85rem",
+                    boxShadow: active ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
+                    transition: "all 0.2s",
+                  }}
+                >{tab.label}</button>
+              );
+            })}
+          </div>
+
+          {/* Cards */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {sortedCurrentList.map((hw, index) => {
+              const m = getMeta(hw.subject);
+              const isFirstSubject = index === 0 || sortedCurrentList[index - 1]?.subject !== hw.subject;
+              return (
+                <div key={hw.id} style={{ display: "grid", gap: "8px" }}>
+                  {isFirstSubject ? (
+                    <div className="flex-between" style={{ padding: "2px 2px 0" }}>
+                      <div className="flex-start" style={{ gap: "8px" }}>
+                        <span style={{ width: 28, height: 28, borderRadius: "8px", background: m.bg, color: m.color, display: "grid", placeItems: "center" }}>{m.emoji}</span>
+                        <strong style={{ fontSize: "0.9rem", color: "var(--text-main)" }}>{hw.subject}</strong>
+                      </div>
+                      <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 800 }}>
+                        {(subjectGroups[hw.subject] || []).length} ta vazifa
+                      </span>
+                    </div>
+                  ) : null}
+                  <div
+                    style={{ background: "white", borderRadius: "16px", padding: "14px", border: "1px solid var(--border)", cursor: "pointer", display: "flex", gap: "12px", alignItems: "flex-start" }}
+                    onClick={() => { setStudentSelectedHomeworkId(hw.id); setStudentUploadStep(showCompleted ? "result" : "detail"); }}
+                  >
+                  <div style={{ width: 42, height: 42, borderRadius: "12px", background: m.bg, display: "grid", placeItems: "center", fontSize: "1.15rem", flexShrink: 0 }}>{m.emoji}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+                      <span style={{ fontSize: "0.72rem", fontWeight: 800, color: m.color }}>{hw.subject}</span>
+                      {hw.student_status !== "submitted" && (
+                        <span style={{ background: "var(--primary)", color: "white", fontSize: "0.58rem", fontWeight: 800, padding: "1px 6px", borderRadius: "99px" }}>Yangi</span>
+                      )}
+                    </div>
+                    <div style={{ fontWeight: 800, fontSize: "0.9rem", color: "var(--text-main)", marginBottom: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hw.title}</div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Topshiriq muddati: {hw.deadline || "Muddatsiz"}</div>
+                    {hw.student_status === "submitted" && (
+                      <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--secondary)" }} />
+                        <span style={{ fontSize: "0.72rem", color: "var(--secondary)", fontWeight: 700 }}>
+                          Baholandi: {hw.latest_score ?? "–"}/{hw.max_score ?? 10}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <ChevronRight size={16} color="var(--text-muted)" style={{ flexShrink: 0, marginTop: "4px" }} />
+                  </div>
+                </div>
+              );
+            })}
+            {currentList.length === 0 && (
+              <div style={{ textAlign: "center", padding: "3rem 1rem", color: "var(--text-muted)" }}>
+                <BookOpen size={32} style={{ marginBottom: "10px", opacity: 0.4 }} />
+                <p style={{ margin: 0, fontSize: "0.88rem" }}>{showCompleted ? "Hali bajarilgan vazifa yo'q." : "Hozircha faol vazifa yo'q."}</p>
+              </div>
+            )}
+          </div>
         </div>
       );
     }
 
-    // HOME TAB
+    // HOME TAB (Screen 1)
+
     const pendingHomeworks = homeworks.filter(h => h.student_status !== "submitted");
     const completedHomeworks = homeworks.filter(h => h.student_status === "submitted");
     const nextTask = pendingHomeworks[0];
 
-    // Simple stats
-    let totalScore = 0;
-    completedHomeworks.forEach(hw => totalScore += (hw.latest_score || 0));
-    const averageScore = completedHomeworks.length ? Math.round((totalScore / (completedHomeworks.length * 10)) * 100) : 0;
-    const totalXP = completedHomeworks.length * 10;
+    const totalXP = studentXP;
 
     return (
-      <div className="animate-fade-in">
-        <div style={{ marginBottom: "1.5rem" }}>
-          <h2 style={{ fontSize: "1.5rem", fontWeight: 800, margin: 0 }}>
-            Salom, {user?.full_name?.split(" ")[0]}! 👋
-          </h2>
-          <p style={{ margin: "2px 0 0", fontSize: "0.9rem", color: "var(--text-muted)" }}>
-            Bugun ajoyib dars bo'lsin!
-          </p>
+      <div className="animate-fade-in pb-20">
+
+        {/* ── Top greeting row ── */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.2rem" }}>
+          <div>
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Assalomu alaykum,</p>
+            <h2 style={{ margin: "2px 0 2px", fontSize: "1.5rem", fontWeight: 900, letterSpacing: "-0.02em", color: "var(--text-main)" }}>
+              {user?.full_name?.split(" ")[0] || "Malika"}! 👋
+            </h2>
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 500 }}>Bugun ajoyib kun bo'lsin!</p>
+          </div>
+          <button
+            onClick={() => setCurrentTab("profile")}
+            style={{ width: 42, height: 42, borderRadius: "50%", border: "2.5px solid var(--border)", padding: 0, cursor: "pointer", overflow: "hidden", background: "var(--surface)", display: "grid", placeItems: "center", flexShrink: 0 }}
+          >
+            {user?.photo_url
+              ? <img src={user.photo_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontWeight: 800, fontSize: "0.9rem", color: "var(--primary)" }}>{initials(user?.full_name || "M")}</span>
+            }
+          </button>
         </div>
 
-        {nextTask ? (
-          <div className="card" style={{ background: "linear-gradient(135deg, var(--primary), #3b82f6)", color: "white", borderColor: "transparent", padding: "1.5rem" }}>
-            <p className="eyebrow" style={{ color: "rgba(255,255,255,0.8)", fontSize: "0.75rem", margin: 0 }}>FAOL VAZIFA</p>
-            <div className="badge badge-green" style={{ background: "rgba(255,255,255,0.2)", color: "white", marginTop: "8px" }}>
-              {nextTask.subject}
+        {/* ── XP / Level / Streak pills ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "1.3rem" }}>
+          {[
+            { label: "XP", val: totalXP.toLocaleString(), sub: "+50 bugun", col: "var(--primary)", icon: <Star size={13} color="var(--primary)" /> },
+            { label: "Daraja", val: "7", sub: "Yaxshi", col: "var(--warning)", icon: <Trophy size={13} color="var(--warning)" /> },
+            { label: "Seriya", val: String(studentStreak), sub: "kun", col: "var(--danger)", icon: <Flame size={13} fill="var(--danger)" color="var(--danger)" /> },
+          ].map(s => (
+            <div key={s.label} style={{ background: "white", borderRadius: "14px", padding: "12px 8px", border: "1px solid var(--border)", textAlign: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "3px", marginBottom: "4px" }}>
+                {s.icon}
+                <span style={{ fontSize: "0.58rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label}</span>
+              </div>
+              <div style={{ fontSize: "1.2rem", fontWeight: 900, color: s.col, lineHeight: 1 }}>{s.val}</div>
+              <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", marginTop: "3px" }}>{s.sub}</div>
             </div>
-            <h3 style={{ color: "white", fontSize: "1.3rem", margin: "8px 0 4px", fontWeight: 700 }}>{nextTask.title}</h3>
-            <p style={{ color: "rgba(255,255,255,0.9)", fontSize: "0.85rem", margin: "0 0 16px" }}>
-              Muddati: {nextTask.deadline || "Tez orada"}
-            </p>
-            <button className="btn" style={{ background: "white", color: "var(--primary)", fontWeight: 700, padding: "0.6rem 1rem" }} onClick={() => setCurrentTab("homeworks")}>
-              Vazifani topshirish
+          ))}
+        </div>
+
+        {/* ── Active homework card ── */}
+        <h3 style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Bugungi topshiriq</h3>
+        {nextTask ? (
+          <div
+            style={{ background: "linear-gradient(135deg, #2563eb 0%, #4f86f7 100%)", borderRadius: "20px", padding: "20px", marginBottom: "1.3rem", position: "relative", overflow: "hidden", cursor: "pointer", boxShadow: "0 10px 30px rgba(37,99,235,0.28)" }}
+            onClick={() => { setStudentSelectedHomeworkId(nextTask.id); setStudentUploadStep("detail"); }}
+          >
+            <div style={{ position: "absolute", top: -25, right: -25, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+            <span style={{ background: "rgba(255,255,255,0.18)", color: "white", fontSize: "0.65rem", fontWeight: 800, padding: "2px 10px", borderRadius: "99px", textTransform: "uppercase" }}>{nextTask.subject}</span>
+            <h3 style={{ color: "white", fontSize: "1.15rem", margin: "10px 0 4px", fontWeight: 800, letterSpacing: "-0.01em" }}>{nextTask.title}</h3>
+            <p style={{ color: "rgba(255,255,255,0.7)", fontSize: "0.78rem", margin: "0 0 16px" }}>Muddati: Bugun 23:59</p>
+            <button style={{ background: "white", color: "#2563eb", border: "none", borderRadius: "10px", padding: "8px 18px", fontWeight: 800, fontSize: "0.82rem", cursor: "pointer" }}>
+              Topshirishni boshlash →
             </button>
           </div>
         ) : (
-          <div className="card flex-center" style={{ padding: "2rem 1rem", flexDirection: "column", color: "var(--text-muted)", textAlign: "center" }}>
-            <Trophy size={36} color="var(--warning)" />
-            <h3 style={{ margin: "8px 0 0" }}>Barcha vazifalar bajarildi!</h3>
-            <p style={{ margin: 0 }}>Hozircha yangi vazifa yo'q.</p>
+          <div style={{ background: "white", borderRadius: "18px", padding: "22px", marginBottom: "1.3rem", textAlign: "center", border: "1px solid var(--border)" }}>
+            <Trophy size={34} color="var(--warning)" style={{ marginBottom: "8px" }} />
+            <h4 style={{ margin: "0 0 4px", fontSize: "0.95rem" }}>Barcha vazifalar bajarildi!</h4>
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Yangi topshiriqlarni kuting</p>
           </div>
         )}
 
-        <div style={{ marginTop: "1.5rem", marginBottom: "0.75rem" }}>
-          <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: 0 }}>Sizning ko'rsatkichlaringiz</h3>
-        </div>
-
-        <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "1.5rem" }}>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <Flame size={24} color="var(--danger)" style={{ marginBottom: "8px" }} />
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>1 kun</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Streak</p>
-          </div>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <Star size={24} color="var(--warning)" style={{ marginBottom: "8px" }} />
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>{totalXP} XP</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Jami tajriba</p>
-          </div>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <div style={{ width: "24px", height: "24px", borderRadius: "50%", border: "3px solid var(--secondary)", display: "grid", placeItems: "center", fontSize: "0.65rem", fontWeight: 800, color: "var(--secondary)", marginBottom: "8px" }}>
-              %
+        {/* ── Quick actions ── */}
+        <h3 style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tezkor kirish</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "1.3rem" }}>
+          <button onClick={() => setCurrentTab("practice")} style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
+            <div style={{ width: 36, height: 36, borderRadius: "10px", background: "rgba(16,185,129,0.1)", color: "var(--secondary)", display: "grid", placeItems: "center", marginBottom: "10px" }}>
+              <PenTool size={18} />
             </div>
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>{averageScore}%</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>O'rtacha ball</p>
-          </div>
-          <div className="stat-card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "1rem", borderRadius: "16px" }}>
-            <Trophy size={24} color="#8b5cf6" style={{ marginBottom: "8px" }} />
-            <div className="stat-value" style={{ fontSize: "1.4rem", fontWeight: 800 }}>{completedHomeworks.length} ta</div>
-            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Topshirilgan</p>
-          </div>
+            <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "var(--text-main)", marginBottom: "2px" }}>Takrorlash</div>
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Oldingi misollar</div>
+          </button>
+          <button onClick={() => setCurrentTab("tutor")} style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
+            <div style={{ width: 36, height: 36, borderRadius: "10px", background: "rgba(139,92,246,0.1)", color: "#8b5cf6", display: "grid", placeItems: "center", marginBottom: "10px" }}>
+              <MessageCircle size={18} />
+            </div>
+            <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "var(--text-main)", marginBottom: "2px" }}>AI izoh</div>
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Xatolar bo'yicha</div>
+          </button>
         </div>
 
-        <button className="btn btn-primary" style={{ display: "flex", width: "100%", justifyContent: "center", fontWeight: 700 }} onClick={() => setCurrentTab("homeworks")}>
-          + Vazifa topshirish
-        </button>
+        {/* ── Completed homeworks list ── */}
+        {completedHomeworks.length > 0 && (
+          <>
+            <h3 style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>So'nggi natijalar</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "1rem" }}>
+              {completedHomeworks.slice(0, 3).map(hw => (
+                <div key={hw.id}
+                  style={{ background: "white", borderRadius: "14px", padding: "12px 14px", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+                  onClick={() => { setStudentSelectedHomeworkId(hw.id); setStudentUploadStep("result"); }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <div style={{ width: 36, height: 36, borderRadius: "10px", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center" }}>
+                      <BookOpen size={16} color="var(--primary)" />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--text-main)" }}>{hw.title}</div>
+                      <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>{hw.subject}</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 800, fontSize: "0.9rem", color: (hw.latest_percentage ?? 0) >= 80 ? "var(--secondary)" : "var(--warning)" }}>
+                      {hw.latest_score ?? "–"}/{hw.max_score ?? 10}
+                    </div>
+                    <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>Baholandi</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {renderJoinClassPanel(classes.length ? "Yana sinfga qo'shilish" : "Sinfga qo'shilish")}
       </div>
@@ -2168,8 +3691,8 @@ export default function App() {
     }
 
     return (
-      <article 
-        className={`card card-interactive ${isActive ? 'active-card' : ''}`} 
+      <article
+        className={`card card-interactive ${isActive ? 'active-card' : ''}`}
         key={homework.id}
         style={{ padding: "1.2rem", marginBottom: "0.8rem", borderLeft: isActive ? `4px solid ${iconColor}` : "1px solid var(--border)" }}
         onClick={() => {
@@ -2191,7 +3714,7 @@ export default function App() {
             <div>
               <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>{homework.title}</h3>
               <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                {homework.subject} • {homework.deadline || "Muddatsiz"}
+                {homework.subject} â€¢ {homework.deadline || "Muddatsiz"}
               </p>
             </div>
           </div>
@@ -2263,7 +3786,7 @@ export default function App() {
         {items.map((submission) => {
           const result = submission.grading_result;
           const problems = result?.problems || [];
-          
+
           return (
             <div className="card" key={submission.id} style={{ padding: "1.2rem", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "16px", boxShadow: "var(--shadow-sm)" }}>
               {/* Submission attempt header */}
@@ -2322,19 +3845,19 @@ export default function App() {
                           const isCorrect = prob.status === "correct";
                           const isIncorrect = prob.status === "incorrect";
                           const isMissing = prob.status === "missing";
-                          
+
                           let statusBg = "rgba(100, 116, 139, 0.05)";
                           let statusColor = "var(--text-muted)";
-                          let statusSymbol = "⚪";
-                          
+                          let statusSymbol = "âšª";
+
                           if (isCorrect) {
                             statusBg = "rgba(16, 185, 129, 0.08)";
                             statusColor = "var(--secondary)";
-                            statusSymbol = "✓";
+                            statusSymbol = "âœ“";
                           } else if (isIncorrect) {
                             statusBg = "rgba(239, 68, 68, 0.08)";
                             statusColor = "var(--danger)";
-                            statusSymbol = "✗";
+                            statusSymbol = "âœ—";
                           } else if (isMissing) {
                             statusBg = "rgba(245, 158, 11, 0.08)";
                             statusColor = "var(--warning)";
@@ -2347,13 +3870,13 @@ export default function App() {
                                 <span style={{ fontWeight: 700, fontSize: "0.85rem" }}>
                                   {prob.problem_number}-masala
                                 </span>
-                                <span style={{ 
-                                  background: statusBg, 
-                                  color: statusColor, 
-                                  fontWeight: 800, 
-                                  fontSize: "0.75rem", 
-                                  padding: "2px 8px", 
-                                  borderRadius: "8px" 
+                                <span style={{
+                                  background: statusBg,
+                                  color: statusColor,
+                                  fontWeight: 800,
+                                  fontSize: "0.75rem",
+                                  padding: "2px 8px",
+                                  borderRadius: "8px"
                                 }}>
                                   {statusSymbol} {prob.status?.toUpperCase() || ""}
                                 </span>
@@ -2367,7 +3890,7 @@ export default function App() {
                                 <div style={{ borderLeft: "2px solid var(--danger)", paddingLeft: "8px", marginTop: "4px" }}>
                                   {prob.errors.map((err: ErrorDetail, eIdx: number) => (
                                     <div key={eIdx} style={{ fontSize: "0.75rem", color: "var(--danger)" }}>
-                                      <strong>Xato:</strong> {err.description} <br/>
+                                      <strong>Xato:</strong> {err.description} <br />
                                       <strong>Tavsiya:</strong> {err.suggestion}
                                     </div>
                                   ))}
@@ -2398,13 +3921,13 @@ export default function App() {
     );
   }
 
-  function renderProgress() {
+  function renderProgressAnalyticsLegacy() {
     const completedHws = homeworks.filter(h => h.student_status === "submitted");
     let totalScore = 0;
     completedHws.forEach(h => totalScore += (h.latest_score || 0));
     const averageScore = completedHws.length ? (totalScore / completedHws.length).toFixed(1) : "0";
     const progressInsights = buildProgressInsights(homeworks, studentSubmissionsByHomework);
-    
+
     return (
       <div className="animate-fade-in">
         <div className="section-title">
@@ -2475,180 +3998,2323 @@ export default function App() {
 
   function renderProfile() {
     const isStudent = user?.role === "student";
-    const completedHws = isStudent ? homeworks.filter(h => h.student_status === "submitted").length : homeworks.length;
-    const xp = completedHws * 10;
-    const level = Math.floor(xp / 100) + 1;
-    const xpNext = level * 100;
-    
+    const completedHomeworks = homeworks.filter((homework) => homework.student_status === "submitted");
+    const level = Math.floor(studentXP / 200) + 1;
+    const xpForNextLevel = level * 200;
+    const xpProgress = Math.min(100, Math.round((studentXP / xpForNextLevel) * 100));
+    const teacherSummary = teacherDashboard?.summary;
+    const teacherAverage = metricPercent(teacherSummary?.average_percentage ?? 84);
+    const teacherRoleText = isStudent ? "O'quvchi" : "O'qituvchi";
+    const nextRole = isStudent ? "teacher" : "student";
+    const profileSaving = busyAction === "profile-save";
+    const profileInitial = (user?.full_name || teacherRoleText).trim().charAt(0).toUpperCase() || "U";
+
     return (
       <div className="animate-fade-in pb-20">
-        <div className="section-title" style={{ marginBottom: "1.2rem" }}>
-          <h2>Mening Profilim</h2>
+        <div className="flex-between" style={{ marginBottom: "1.2rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "var(--text-main)" }}>Mening Profilim</h2>
+          <button
+            className="icon-btn"
+            type="button"
+            title="Profilni tahrirlash"
+            onClick={openProfileEditor}
+          >
+            <Edit size={18} />
+          </button>
         </div>
 
-        {/* Profile Card Header */}
-        <div className="card" style={{ textAlign: "center", padding: "24px 16px", marginBottom: "16px", background: "linear-gradient(135deg, var(--surface) 0%, rgba(59, 130, 246, 0.03) 100%)", position: "relative" }}>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            {user?.photo_url ? (
-              <img 
-                src={user.photo_url} 
-                alt={user.full_name} 
-                style={{ 
-                  width: "90px", 
-                  height: "90px", 
-                  borderRadius: "50%", 
-                  objectFit: "cover", 
-                  border: "4px solid white",
-                  boxShadow: "0 8px 24px rgba(0, 0, 0, 0.08)",
-                  marginBottom: "12px"
-                }} 
-              />
-            ) : (
-              <div 
-                className="avatar-lg" 
-                style={{ 
-                  margin: "0 auto 12px", 
-                  background: isStudent ? "linear-gradient(135deg, var(--secondary), #10b981)" : "linear-gradient(135deg, var(--primary), #3b82f6)", 
-                  color: "white", 
-                  fontSize: "1.8rem", 
-                  fontWeight: "bold",
-                  boxShadow: "0 8px 20px rgba(0,0,0,0.06)",
+        <div
+          className="card"
+          style={{
+            padding: "32px 20px 30px",
+            marginBottom: "16px",
+            borderRadius: "28px",
+            minHeight: "260px",
+            textAlign: "center",
+            background: "linear-gradient(145deg, #ffffff 0%, #f8fbff 100%)",
+            boxShadow: "0 18px 40px rgba(15,23,42,0.08)",
+          }}
+        >
+          <div style={{ display: "grid", justifyItems: "center" }}>
+            <div
+              style={{
+                width: 112,
+                height: 112,
+                borderRadius: "50%",
+                padding: 5,
+                marginBottom: 28,
+                background: "#ffffff",
+                boxShadow: "0 16px 38px rgba(99,102,241,0.22)",
+              }}
+            >
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  borderRadius: "50%",
+                  background: isStudent ? "linear-gradient(135deg, #34d399, #2563eb)" : "linear-gradient(135deg, #7da2ff, #5b4ff0)",
+                  color: "#ffffff",
                   display: "grid",
-                  placeItems: "center"
+                  placeItems: "center",
+                  overflow: "hidden",
                 }}
               >
-                {initials(user?.full_name || "") || <UserRound size={36} />}
+                {user?.photo_url ? (
+                  <img src={user.photo_url} alt={user.full_name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                ) : (
+                  <span style={{ fontWeight: 800, fontSize: "3rem", lineHeight: 1 }}>{profileInitial}</span>
+                )}
               </div>
-            )}
-            <span style={{ 
-              position: "absolute", 
-              bottom: "16px", 
-              right: "4px", 
-              width: "16px", 
-              height: "16px", 
-              borderRadius: "50%", 
-              background: "var(--green)", 
-              border: "3px solid white" 
-            }}></span>
+            </div>
+            <h3 style={{ margin: "0 0 14px", fontSize: "1.38rem", lineHeight: 1.2, fontWeight: 900, color: "var(--text-main)", maxWidth: "100%", overflowWrap: "anywhere" }}>
+              {user?.full_name || "Foydalanuvchi"}
+            </h3>
+            <p style={{ margin: 0, fontSize: "0.98rem", fontWeight: 800, color: "var(--text-muted)" }}>
+              {teacherRoleText} rejimi
+            </p>
           </div>
-
-          <h2 style={{ margin: "0 0 4px", fontSize: "1.3rem", fontWeight: 800 }}>{user?.full_name}</h2>
-          <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 500 }}>
-            {isStudent ? "O'quvchi rejimi" : "O'qituvchi rejimi"}
-          </p>
         </div>
 
-        {/* Personal Details Card */}
-        <div className="card" style={{ padding: "18px", marginBottom: "16px" }}>
-          <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "14px", color: "var(--text-main)", display: "flex", alignItems: "center", gap: "6px" }}>
-            <UserRound size={16} color="var(--primary)" />
+        {profileEditing ? (
+          <form className="card animate-fade-in" style={{ padding: "18px", marginBottom: "16px", borderRadius: "14px" }} onSubmit={handleProfileSubmit}>
+            <div className="flex-between">
+              <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 900 }}>Profilni tahrirlash</h3>
+              <button className="icon-btn" type="button" title="Yopish" onClick={() => setProfileEditing(false)} style={{ width: 34, height: 34 }}>
+                <X size={16} />
+              </button>
+            </div>
+            <label className="input-group" style={{ marginBottom: 0 }}>
+              <span className="input-label">Ism va familiya</span>
+              <input
+                className="input-field"
+                value={profileDraft.full_name}
+                onChange={(event) => setProfileDraft({ full_name: event.target.value })}
+                placeholder="Masalan: Malika To'rayeva"
+                disabled={profileSaving}
+              />
+            </label>
+            <div className="action-row">
+              <button className="btn btn-outline" type="button" disabled={profileSaving} onClick={() => setProfileEditing(false)}>
+                <X size={17} />
+                Bekor qilish
+              </button>
+              <button className="btn btn-primary" type="submit" disabled={profileSaving || !profileDraft.full_name.trim()}>
+                {profileSaving ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <Check size={17} />}
+                Saqlash
+              </button>
+            </div>
+          </form>
+        ) : null}
+
+        <div className="card" style={{ padding: "18px", marginBottom: "16px", borderRadius: "14px" }}>
+          <h3 style={{ fontSize: "0.95rem", fontWeight: 900, margin: 0, color: "var(--text-main)", display: "flex", alignItems: "center", gap: "7px" }}>
+            <UserRound size={17} color="var(--primary)" />
             Shaxsiy ma'lumotlar
           </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div className="flex-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.03)", paddingBottom: "10px" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Ism va familiya</span>
-              <strong style={{ fontSize: "0.85rem", color: "var(--text-main)" }}>{user?.full_name}</strong>
-            </div>
-            <div className="flex-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.03)", paddingBottom: "10px" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Telegram username</span>
-              <strong style={{ fontSize: "0.85rem", color: "var(--primary)" }}>
-                {user?.telegram_username ? `@${user.telegram_username}` : "Mavjud emas"}
-              </strong>
-            </div>
-            <div className="flex-between" style={{ borderBottom: "1px solid rgba(0,0,0,0.03)", paddingBottom: "10px" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Telegram ID</span>
-              <strong style={{ fontSize: "0.85rem", color: "var(--text-main)", fontFamily: "monospace" }}>{user?.telegram_id}</strong>
-            </div>
-            <div className="flex-between">
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Foydalanish roli</span>
-              <span className={`badge ${isStudent ? 'badge-green' : 'badge-blue'}`} style={{ fontWeight: 800, fontSize: "0.7rem", padding: "3px 10px" }}>
-                {isStudent ? "STUDENT" : "TEACHER"}
-              </span>
-            </div>
+          <div style={{ display: "grid", gap: "11px" }}>
+            {[
+              ["Ism va familiya", user?.full_name || "Kiritilmagan"],
+              ["Telegram username", user?.telegram_username ? `@${user.telegram_username}` : "Mavjud emas"],
+              ["Rol", teacherRoleText],
+            ].map(([label, value]) => (
+              <div className="flex-between" key={label} style={{ gap: "12px", borderTop: "1px solid var(--border)", paddingTop: "10px" }}>
+                <span style={{ fontSize: "0.82rem", color: "var(--text-muted)", fontWeight: 700 }}>{label}</span>
+                <strong style={{ fontSize: "0.84rem", color: "var(--text-main)", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</strong>
+              </div>
+            ))}
           </div>
         </div>
 
-        {/* Statistics & Achievements Section */}
         {isStudent ? (
           <>
-            <div className="card" style={{ padding: "18px", marginBottom: "16px" }}>
-              <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "14px", color: "var(--text-main)", display: "flex", alignItems: "center", gap: "6px" }}>
-                <TrendingUp size={16} color="var(--secondary)" />
-                Tajriba va daraja (XP)
+            <div className="card" style={{ padding: "18px", marginBottom: "16px", borderRadius: "14px" }}>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 900, margin: 0, display: "flex", alignItems: "center", gap: "7px" }}>
+                <TrendingUp size={17} color="var(--secondary)" />
+                O'quvchi natijalari
               </h3>
-              <div style={{ background: "var(--background)", padding: "16px", borderRadius: "12px" }}>
-                <div className="flex-between" style={{ marginBottom: "6px" }}>
-                  <strong style={{ fontSize: "1rem", color: "var(--text-main)" }}>Level {level}</strong>
-                  <span style={{ fontWeight: 700, fontSize: "0.85rem", color: "var(--secondary)" }}>{xp} / {xpNext} XP</span>
+              <div style={{ background: "var(--background)", padding: "14px", borderRadius: "10px" }}>
+                <div className="flex-between" style={{ marginBottom: "7px" }}>
+                  <strong style={{ fontSize: "0.95rem" }}>Daraja {level}</strong>
+                  <span style={{ color: "var(--secondary)", fontSize: "0.8rem", fontWeight: 800 }}>{studentXP} / {xpForNextLevel} XP</span>
                 </div>
-                <div style={{ width: "100%", height: "8px", background: "var(--border)", borderRadius: "4px", overflow: "hidden" }}>
-                  <div style={{ width: `${(xp / xpNext) * 100}%`, height: "100%", background: "var(--secondary)", borderRadius: "4px" }}></div>
+                <div style={{ height: 8, background: "var(--border)", borderRadius: 999, overflow: "hidden" }}>
+                  <div style={{ width: `${xpProgress}%`, height: "100%", background: "linear-gradient(90deg, var(--primary), var(--secondary))" }} />
                 </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+                {[
+                  { label: "Seriya", value: `${studentStreak} kun`, icon: <Flame size={17} color="var(--danger)" /> },
+                  { label: "Topshiriq", value: `${completedHomeworks.length}`, icon: <ClipboardList size={17} color="var(--primary)" /> },
+                  { label: "O'rtacha", value: "4.3/5", icon: <Star size={17} color="var(--warning)" /> },
+                ].map((item) => (
+                  <div key={item.label} style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "10px", textAlign: "center", background: "white" }}>
+                    <div style={{ display: "grid", placeItems: "center", marginBottom: "4px" }}>{item.icon}</div>
+                    <strong style={{ display: "block", fontSize: "0.9rem" }}>{item.value}</strong>
+                    <span style={{ fontSize: "0.66rem", color: "var(--text-muted)", fontWeight: 700 }}>{item.label}</span>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div className="card" style={{ padding: "18px", marginBottom: "16px" }}>
-              <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "14px", color: "var(--text-main)", display: "flex", alignItems: "center", gap: "6px" }}>
-                <Trophy size={16} color="var(--warning)" />
-                Erishilgan yutuqlar (Achievements)
+            <div className="card" style={{ padding: "18px", marginBottom: "16px", borderRadius: "14px" }}>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 900, margin: 0, display: "flex", alignItems: "center", gap: "7px" }}>
+                <TrendingUp size={17} color="var(--primary)" />
+                Fanlar bo'yicha o'sish
               </h3>
-              <div className="flex-start" style={{ gap: "16px", overflowX: "auto", paddingBottom: "6px" }}>
-                <div style={{ minWidth: "85px", textAlign: "center", opacity: xp >= 10 ? 1 : 0.4 }}>
-                  <div style={{ width: "46px", height: "46px", margin: "0 auto 8px", background: "rgba(59,130,246,0.1)", borderRadius: "50%", display: "grid", placeItems: "center", color: "var(--primary)" }}>
-                    <Check size={20} />
+              <div style={{ display: "grid", gap: "12px" }}>
+                {subjectGrowthRows().map((row) => {
+                  const meta = getSubjectMeta(row.subject);
+                  return (
+                    <div key={row.subject} style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "12px", background: "white" }}>
+                      <div className="flex-between" style={{ marginBottom: "6px" }}>
+                        <div className="flex-start" style={{ gap: "8px" }}>
+                          <span style={{ width: 30, height: 30, borderRadius: "8px", background: meta.bg, color: meta.color, display: "grid", placeItems: "center" }}>{meta.icon}</span>
+                          <strong style={{ fontSize: "0.86rem" }}>{row.subject}</strong>
+                        </div>
+                        <span style={{ fontSize: "0.78rem", color: row.delta >= 0 ? "var(--secondary)" : "var(--danger)", fontWeight: 900 }}>
+                          {row.delta >= 0 ? "+" : ""}{row.delta}%
+                        </span>
+                      </div>
+                      {renderLineGraph(row.values, meta.color)}
+                      <div className="flex-between" style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontWeight: 700 }}>
+                        <span>O'rtacha: {row.average}%</span>
+                        <span>5 ta oxirgi ish</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "18px", marginBottom: "16px", borderRadius: "14px" }}>
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 900, margin: 0, display: "flex", alignItems: "center", gap: "7px" }}>
+                <Trophy size={17} color="var(--warning)" />
+                Yutuqlar
+              </h3>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                {[
+                  { label: "Izlanuvchi", sub: "10 ta mashq yakunlandi", done: true },
+                  { label: "Muntazam", sub: "7 kun ketma-ket", done: true },
+                  { label: "Perfeksionist", sub: "90%+ aniqlik", done: false },
+                  { label: "Faol", sub: "1000 XP yig'ildi", done: studentXP >= 1000 },
+                ].map((item) => (
+                  <div key={item.label} style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "10px", background: item.done ? "white" : "#f8fafc", opacity: item.done ? 1 : 0.58 }}>
+                    <strong style={{ display: "block", fontSize: "0.8rem" }}>{item.label}</strong>
+                    <span style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>{item.sub}</span>
                   </div>
-                  <span style={{ fontSize: "0.75rem", fontWeight: 600, display: "block" }}>Ilk qadam</span>
-                </div>
-                <div style={{ minWidth: "85px", textAlign: "center", opacity: xp >= 100 ? 1 : 0.4 }}>
-                  <div style={{ width: "46px", height: "46px", margin: "0 auto 8px", background: "rgba(16,185,129,0.1)", borderRadius: "50%", display: "grid", placeItems: "center", color: "var(--secondary)" }}>
-                    <Trophy size={20} />
-                  </div>
-                  <span style={{ fontSize: "0.75rem", fontWeight: 600, display: "block" }}>Bilimdon</span>
-                </div>
-                <div style={{ minWidth: "85px", textAlign: "center", opacity: classes.length > 0 ? 1 : 0.4 }}>
-                  <div style={{ width: "46px", height: "46px", margin: "0 auto 8px", background: "rgba(139,92,246,0.1)", borderRadius: "50%", display: "grid", placeItems: "center", color: "#8b5cf6" }}>
-                    <School size={20} />
-                  </div>
-                  <span style={{ fontSize: "0.75rem", fontWeight: 600, display: "block" }}>Sinf a'zosi</span>
-                </div>
+                ))}
               </div>
             </div>
           </>
         ) : (
-          <div className="card" style={{ padding: "18px", marginBottom: "16px" }}>
-            <h3 style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "14px", color: "var(--text-main)", display: "flex", alignItems: "center", gap: "6px" }}>
-              <School size={16} color="var(--primary)" />
-              Faoliyat statistikasi
+          <div className="card" style={{ padding: "18px", marginBottom: "16px", borderRadius: "14px" }}>
+            <h3 style={{ fontSize: "0.95rem", fontWeight: 900, margin: 0, display: "flex", alignItems: "center", gap: "7px" }}>
+              <School size={17} color="var(--primary)" />
+              O'qituvchi statistikasi
             </h3>
-            <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "8px" }}>
-              <div className="stat-card" style={{ padding: "12px" }}>
-                <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--primary)" }}>{classes.length} ta</div>
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Boshqaradigan sinflar</p>
-              </div>
-              <div className="stat-card" style={{ padding: "12px" }}>
-                <div style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--secondary)" }}>{homeworks.length} ta</div>
-                <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Berilgan vazifalar</p>
-              </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              {[
+                { label: "Sinflar", value: `${teacherSummary?.class_count ?? classes.length}`, icon: <UsersRound size={18} color="var(--primary)" /> },
+                { label: "O'quvchilar", value: `${teacherSummary?.student_count ?? classes.reduce((sum, item) => sum + (item.student_count ?? 0), 0)}`, icon: <GraduationCap size={18} color="var(--secondary)" /> },
+                { label: "Faol vazifalar", value: `${teacherSummary?.published_homework_count ?? allTeacherHomeworks.filter((item) => item.status === "published").length}`, icon: <BookOpen size={18} color="var(--warning)" /> },
+                { label: "O'rtacha natija", value: teacherAverage, icon: <TrendingUp size={18} color="#8b5cf6" /> },
+              ].map((item) => (
+                <div key={item.label} style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "12px", background: "white" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+                    {item.icon}
+                    <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 800 }}>{item.label}</span>
+                  </div>
+                  <strong style={{ fontSize: "1.15rem", color: "var(--text-main)" }}>{item.value}</strong>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Developer Test Switch */}
-        <div style={{ marginTop: "24px" }}>
-          <h3 style={{ fontSize: "0.85rem", fontWeight: 800, marginBottom: "10px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Tizim sozlamalari (Local)
+        <div className="card" style={{ padding: "18px", borderRadius: "14px" }}>
+          <h3 style={{ fontSize: "0.9rem", fontWeight: 900, margin: 0, color: "var(--text-main)" }}>
+            Local test rejimi
           </h3>
-          <button 
-            className="btn btn-outline" 
-            style={{ width: "100%", justifyContent: "center", background: "white", borderColor: "var(--border)", fontWeight: 700 }}
-            onClick={() => void chooseRole(isStudent ? "teacher" : "student")}
+          <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-muted)", lineHeight: 1.45 }}>
+            Demo vaqtida rolni tez almashtirib, ikkala dizaynni ham tekshirishingiz mumkin.
+          </p>
+          <button
+            className="btn btn-outline"
+            type="button"
+            style={{ width: "100%", justifyContent: "center", background: "white", borderColor: "var(--border)", fontWeight: 800 }}
+            onClick={() => void chooseRole(nextRole)}
             disabled={isBusy}
           >
-            <RefreshCcw size={16} style={{ marginRight: "6px" }} />
+            <RefreshCcw size={16} />
             {isStudent ? "O'qituvchi rejimiga o'tish" : "O'quvchi rejimiga o'tish"}
           </button>
         </div>
       </div>
     );
   }
+
+  function renderQuestionBank() {
+    return (
+      <div className="animate-fade-in pb-20">
+        <div className="flex-between" style={{ marginBottom: "1.2rem", alignItems: "center" }}>
+          <div>
+            <h2 style={{ fontSize: "1.4rem", fontWeight: 800, margin: 0 }}>Savollar banki</h2>
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Sinflar uchun AI-tahlil va savollar boshqaruvi</p>
+          </div>
+          <button
+            className="btn btn-primary"
+            style={{ padding: "8px 16px", borderRadius: "12px", display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem", fontWeight: 700 }}
+            onClick={() => {
+              setQbWizardOpen(!qbWizardOpen);
+              setQbExtractedResult([]);
+            }}
+          >
+            {qbWizardOpen ? <ArrowLeft size={16} /> : <Plus size={16} />}
+            {qbWizardOpen ? "Ro'yxatga qaytish" : "Material qo'shish"}
+          </button>
+        </div>
+
+        {qbWizardOpen ? renderWizard() : (
+          <>
+            {/* Stats row */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: "16px" }}>
+              <div style={{ background: "white", padding: "10px 8px", borderRadius: "10px", border: "1px solid var(--border)", textAlign: "center" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--text-main)" }}>{qbQuestions.length}</div>
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>Jami</div>
+              </div>
+              <div style={{ background: "white", padding: "10px 8px", borderRadius: "10px", border: "1px solid var(--border)", textAlign: "center" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--secondary)" }}>
+                  {qbQuestions.filter(q => q.status === "approved").length}
+                </div>
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>Tasdiqlangan</div>
+              </div>
+              <div style={{ background: "white", padding: "10px 8px", borderRadius: "10px", border: "1px solid var(--border)", textAlign: "center" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--warning)" }}>
+                  {qbQuestions.filter(q => q.status === "draft").length}
+                </div>
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>Tekshirish</div>
+              </div>
+              <div style={{ background: "white", padding: "10px 8px", borderRadius: "10px", border: "1px solid var(--border)", textAlign: "center" }}>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--primary)" }}>
+                  {new Set(qbQuestions.map(q => q.topic_id)).size}
+                </div>
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>Mavzular</div>
+              </div>
+            </div>
+
+            {/* Filters panel */}
+            <div className="card" style={{ padding: "16px", marginBottom: "16px", background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "12px" }}>
+                <Sliders size={16} color="var(--primary)" />
+                <h3 style={{ fontSize: "0.9rem", fontWeight: 800, margin: 0 }}>Filtrlar</h3>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Sinf</label>
+                  <select
+                    value={qbFilterGrade}
+                    onChange={e => setQbFilterGrade(e.target.value === "" ? "" : Number(e.target.value))}
+                    style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                  >
+                    <option value="">Barchasi</option>
+                    {qbGradesList.map(g => (
+                      <option key={g.grade} value={g.grade}>{g.grade}-sinf</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Mavzu</label>
+                  <select
+                    value={qbFilterTopicId}
+                    onChange={e => setQbFilterTopicId(e.target.value)}
+                    style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                  >
+                    <option value="">Barchasi</option>
+                    {qbTopicsList.map(t => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.grade}-sinf)</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Ko'nikma</label>
+                  <select
+                    value={qbFilterSkillId}
+                    onChange={e => setQbFilterSkillId(e.target.value)}
+                    style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                    disabled={!qbFilterTopicId}
+                  >
+                    <option value="">Barchasi</option>
+                    {qbSkillsList.map(s => (
+                      <option key={s.slug} value={s.slug}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Holat</label>
+                  <select
+                    value={qbFilterStatus}
+                    onChange={e => setQbFilterStatus(e.target.value)}
+                    style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                  >
+                    <option value="">Barchasi (Aktiv)</option>
+                    <option value="approved">Tasdiqlangan</option>
+                    <option value="draft">Qoralama (Draft)</option>
+                    <option value="rejected">Rad etilgan</option>
+                    <option value="archived">Arxivlangan</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex-end" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {qbQuestions.some(q => q.status === "draft") && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ padding: "6px 12px", fontSize: "0.75rem", marginRight: "auto", background: "#e6f4ea", color: "#137333", border: "1px solid #137333", display: "flex", alignItems: "center", gap: "4px" }}
+                    onClick={handleApproveAllQuestions}
+                    disabled={isBusy}
+                  >
+                    <Check size={14} />
+                    Hammasini tasdiqlash ({qbQuestions.filter(q => q.status === "draft").length})
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "6px 12px", fontSize: "0.75rem" }}
+                  onClick={() => {
+                    setQbFilterGrade("");
+                    setQbFilterTopicId("");
+                    setQbFilterSkillId("");
+                    setQbFilterStatus("");
+                  }}
+                >
+                  Filtrlarni tozalash
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ padding: "6px 12px", fontSize: "0.75rem" }}
+                  onClick={() => void loadQuestionBankQuestions(user!.id)}
+                >
+                  Izlash
+                </button>
+              </div>
+            </div>
+
+            {/* Questions List */}
+            {qbLoading ? (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "var(--text-muted)" }}>
+                <RefreshCcw size={24} className="spin" style={{ margin: "0 auto 10px" }} />
+                <span>Savollar yuklanmoqda...</span>
+              </div>
+            ) : qbQuestions.length === 0 ? (
+              <div className="empty-state">
+                <AlertCircle size={28} color="var(--text-muted)" style={{ marginBottom: "8px" }} />
+                <p style={{ margin: 0 }}>Hech qanday savol topilmadi.</p>
+                <button
+                  className="btn btn-outline mt-2"
+                  onClick={() => {
+                    setQbWizardOpen(true);
+                    setQbExtractedResult([]);
+                  }}
+                >
+                  Yangi savol qo'shish
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                {qbQuestions.map(q => renderQuestionCard(q))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Editing Modal */}
+        {qbEditingQuestion && renderEditModal()}
+      </div>
+    );
+  }
+
+  function renderWizard() {
+    return (
+      <div className="card animate-fade-in" style={{ padding: "20px", background: "white", border: "1px solid var(--border)" }}>
+        <h3 style={{ fontSize: "1.1rem", fontWeight: 800, marginBottom: "16px", color: "var(--text-main)" }}>
+          AI Savol Yaratish Oynasi
+        </h3>
+
+        <form onSubmit={handleExtractQuestions}>
+          {/* Step 1: Select Curriculum Level */}
+          <div style={{ borderBottom: "1px solid var(--border)", paddingBottom: "16px", marginBottom: "16px" }}>
+            <h4 style={{ margin: "0 0 10px", fontSize: "0.85rem", color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              1. Mavzu va Ko'nikmalarni tanlash
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Sinf *</label>
+                <select
+                  value={qbGrade}
+                  onChange={e => setQbGrade(e.target.value === "" ? "" : Number(e.target.value))}
+                  style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                  required
+                >
+                  <option value="">Tanlang</option>
+                  {qbGradesList.map(g => (
+                    <option key={g.grade} value={g.grade}>{g.grade}-sinf</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Mavzu *</label>
+                <select
+                  value={showCustomTopicInput ? "NEW_CUSTOM_TOPIC" : qbTopicId}
+                  onChange={e => {
+                    if (e.target.value === "NEW_CUSTOM_TOPIC") {
+                      setShowCustomTopicInput(true);
+                      setQbTopicId("");
+                    } else {
+                      setShowCustomTopicInput(false);
+                      setQbTopicId(e.target.value);
+                    }
+                  }}
+                  style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                  required={!showCustomTopicInput}
+                  disabled={qbGrade === ""}
+                >
+                  <option value="">Tanlang</option>
+                  {qbTopicsList.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                  {qbGrade !== "" && (
+                    <option value="NEW_CUSTOM_TOPIC" style={{ color: "var(--primary)", fontWeight: "bold" }}>
+                      + Yangi mavzu
+                    </option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {showCustomTopicInput && (
+              <div style={{ marginTop: "10px", background: "var(--background)", padding: "10px", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>
+                  Yangi mavzu nomi *
+                </label>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    type="text"
+                    placeholder="Masalan: Diskriminant va ildizlar"
+                    value={customTopicName}
+                    onChange={e => setCustomTopicName(e.target.value)}
+                    style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ padding: "8px 12px", fontSize: "0.8rem" }}
+                    onClick={handleCreateCustomTopic}
+                    disabled={isBusy || !customTopicName.trim()}
+                  >
+                    Yaratish
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ padding: "8px 12px", fontSize: "0.8rem" }}
+                    onClick={() => {
+                      setShowCustomTopicInput(false);
+                      setCustomTopicName("");
+                      setQbTopicId("");
+                    }}
+                  >
+                    Bekor qilish
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {qbSkillsList.length > 0 && (
+              <div style={{ marginTop: "10px" }}>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "6px", fontWeight: 600 }}>
+                  Mavzuga oid ko'nikmalar (AI faqat shular doirasida moslaydi)
+                </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "150px", overflowY: "auto", padding: "8px", background: "var(--background)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                  {qbSkillsList.map(s => (
+                    <label key={s.slug} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.75rem", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={qbSelectedSkills.includes(s.slug) || true}
+                        readOnly
+                      />
+                      <span><strong>{s.name}</strong> - <span style={{ color: "var(--text-muted)" }}>{s.description}</span></span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Step 2: Material Ingestion */}
+          <div style={{ borderBottom: "1px solid var(--border)", paddingBottom: "16px", marginBottom: "16px" }}>
+            <h4 style={{ margin: "0 0 10px", fontSize: "0.85rem", color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              2. Material manbasini yuklash
+            </h4>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Kitob/Varaq rasmi (Ixtiyoriy)</label>
+              <div style={{ border: "2px dashed var(--border)", borderRadius: "10px", padding: "16px", textAlign: "center", cursor: "pointer", position: "relative" }} className="card-interactive">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => setQbFile(e.target.files?.[0] || null)}
+                  style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
+                />
+                <Camera size={24} color="var(--text-muted)" style={{ margin: "0 auto 8px" }} />
+                <span style={{ fontSize: "0.75rem", fontWeight: 600, display: "block" }}>
+                  {qbFile ? qbFile.name : "Rasm tanlash (yoki kameradan olish)"}
+                </span>
+                {qbFile && (
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    style={{ padding: "2px 8px", fontSize: "0.65rem", marginTop: "8px", zIndex: 2 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setQbFile(null);
+                    }}
+                  >
+                    O'chirish
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Yoki matn ko'rinishida yozing (Ixtiyoriy)</label>
+              <textarea
+                placeholder="Masalan: Kvadrat tenglamaga doir 3 ta savol tuzib ber yoki rasmdagi 2-mashqni yechimini aniqlab ber..."
+                value={qbTextContent}
+                onChange={e => setQbTextContent(e.target.value)}
+                style={{ width: "100%", minHeight: "80px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white", resize: "vertical" }}
+              />
+            </div>
+          </div>
+
+          <div className="flex-end">
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => {
+                setQbWizardOpen(false);
+                setQbExtractedResult([]);
+              }}
+              disabled={qbExtracting}
+            >
+              Bekor qilish
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ marginLeft: "8px" }}
+              disabled={qbExtracting || (!qbTextContent.trim() && !qbFile)}
+            >
+              {qbExtracting ? (
+                <>
+                  <RefreshCcw size={16} className="spin" style={{ marginRight: "6px" }} />
+                  AI Tahlil qilmoqda...
+                </>
+              ) : "AI orqali tahlil qilish"}
+            </button>
+          </div>
+        </form>
+
+        {/* Wizard Review Area */}
+        {qbExtractedResult.length > 0 && (
+          <div style={{ marginTop: "24px", borderTop: "2px solid var(--primary)", paddingTop: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+              <h3 style={{ fontSize: "1rem", fontWeight: 800, margin: 0, color: "var(--primary)" }}>
+                AI tomonidan aniqlangan va saqlangan savollar ({qbExtractedResult.length} ta)
+              </h3>
+              {qbExtractedResult.some(q => q.status === "draft") && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: "6px 12px", fontSize: "0.75rem", background: "#e6f4ea", color: "#137333", border: "1px solid #137333", display: "flex", alignItems: "center", gap: "4px" }}
+                  onClick={handleApproveAllExtracted}
+                  disabled={isBusy}
+                >
+                  <Check size={14} />
+                  Hammasini tasdiqlash
+                </button>
+              )}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {qbExtractedResult.map(q => renderQuestionCard(q, true))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderQuestionCard(q: any, _isExtractedView = false) {
+    const isApproved = q.status === "approved";
+    const isDraft = q.status === "draft";
+
+    const diffLabels = ["Oson", "O'rtacha", "Qiyin"];
+    const diffColors = ["var(--secondary)", "var(--warning)", "var(--danger)"];
+    const diffColor = diffColors[(q.difficulty || 2) - 1] || "var(--primary)";
+
+    const isTestingThis = qbTestingVariantId === q.id;
+
+    return (
+      <div key={q.id} className="card" style={{ padding: "16px", border: "1px solid var(--border)", background: "white", position: "relative" }}>
+        {/* Top Badges */}
+        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <span style={{
+              background: isApproved ? "rgba(16, 185, 129, 0.08)" : isDraft ? "rgba(245, 158, 11, 0.08)" : "rgba(100, 116, 139, 0.08)",
+              color: isApproved ? "var(--secondary)" : isDraft ? "var(--warning)" : "var(--text-muted)",
+              fontWeight: 800, fontSize: "0.7rem", padding: "2px 8px", borderRadius: "8px"
+            }}>
+              {q.status?.toUpperCase() || "DRAFT"}
+            </span>
+
+            <span style={{
+              background: `rgba(${q.difficulty === 1 ? '16, 185, 129' : q.difficulty === 3 ? '239, 68, 68' : '245, 158, 11'}, 0.08)`,
+              color: diffColor,
+              fontWeight: 800, fontSize: "0.7rem", padding: "2px 8px", borderRadius: "8px"
+            }}>
+              {diffLabels[(q.difficulty || 2) - 1] || "O'rtacha"}
+            </span>
+
+            <span style={{ background: "rgba(59, 130, 246, 0.08)", color: "var(--primary)", fontWeight: 800, fontSize: "0.7rem", padding: "2px 8px", borderRadius: "8px" }}>
+              {q.question_type === "multiple_choice" ? "MCQ" : q.question_type === "numeric" ? "Numeric" : "Short Answer"}
+            </span>
+
+            {/* Validation Badge */}
+            {q.validation_status && (
+              <span style={{
+                background: q.validation_status === "verified" ? "rgba(16, 185, 129, 0.08)" : q.validation_status === "failed" ? "rgba(239, 68, 68, 0.08)" : "rgba(245, 158, 11, 0.08)",
+                color: q.validation_status === "verified" ? "var(--secondary)" : q.validation_status === "failed" ? "var(--danger)" : "var(--warning)",
+                fontWeight: 800, fontSize: "0.7rem", padding: "2px 8px", borderRadius: "8px"
+              }}>
+                Solver: {q.validation_status === "verified" ? "Tasdiqlandi" : q.validation_status === "failed" ? "Xato aniqlandi" : "Tekshirish kutilmoqda"}
+              </span>
+            )}
+          </div>
+          <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+            Sinf: {q.grade} | Mavzu ID: {q.topic_id}
+          </span>
+        </div>
+
+        {/* Question Text */}
+        <p style={{ margin: "0 0 12px", fontWeight: 700, fontSize: "0.9rem", color: "var(--text-main)", whiteSpace: "pre-wrap" }}>
+          {q.question_text}
+        </p>
+
+        {/* Options if MCQ */}
+        {q.question_type === "multiple_choice" && q.options && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+            {q.options.map((opt: string, oIdx: number) => {
+              const isCorrectOpt = oIdx === q.correct_option_index;
+              return (
+                <div key={oIdx} style={{
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: `1px solid ${isCorrectOpt ? "var(--secondary)" : "var(--border)"}`,
+                  background: isCorrectOpt ? "rgba(16, 185, 129, 0.05)" : "var(--background)",
+                  fontSize: "0.8rem",
+                  fontWeight: isCorrectOpt ? 700 : 500
+                }}>
+                  {String.fromCharCode(65 + oIdx)}) {opt} {isCorrectOpt && "âœ“"}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Correct Answer */}
+        <div style={{ background: "var(--background)", padding: "10px", borderRadius: "8px", marginBottom: "12px" }}>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 600 }}>To'g'ri javob:</div>
+          <strong style={{ fontSize: "0.85rem", color: "var(--secondary)" }}>
+            {q.question_type === "multiple_choice"
+              ? `${String.fromCharCode(65 + (q.correct_option_index ?? 0))}) ${q.options?.[q.correct_option_index ?? 0] || ""}`
+              : q.correct_answer}
+          </strong>
+        </div>
+
+        {/* Solution Steps */}
+        {q.solution_steps && q.solution_steps.length > 0 && (
+          <details style={{ marginBottom: "12px", cursor: "pointer" }}>
+            <summary style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--primary)" }}>
+              Yechim qadamlari ({q.solution_steps.length} ta qadam)
+            </summary>
+            <div style={{ padding: "8px 12px", background: "var(--background)", borderRadius: "8px", marginTop: "6px", fontSize: "0.75rem" }}>
+              {q.solution_steps.map((step: string, idx: number) => (
+                <div key={idx} style={{ marginBottom: "4px" }}>
+                  <strong>{idx + 1}-qadam:</strong> {step}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {/* Skill Slugs Tags */}
+        {q.skill_ids && q.skill_ids.length > 0 && (
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "12px" }}>
+            {q.skill_ids.map((slug: string) => (
+              <span key={slug} style={{ fontSize: "0.65rem", background: "rgba(139, 92, 246, 0.08)", color: "#8b5cf6", padding: "1px 6px", borderRadius: "4px", fontWeight: 600 }}>
+                #{slug}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Actions panel */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--border)", paddingTop: "10px", marginTop: "10px" }}>
+          <div style={{ display: "flex", gap: "6px" }}>
+            {isDraft && (
+              <>
+                <button
+                  className="btn btn-outline"
+                  style={{ padding: "4px 10px", fontSize: "0.75rem", borderColor: "var(--secondary)", color: "var(--secondary)", background: "rgba(16, 185, 129, 0.03)" }}
+                  onClick={() => void handleApproveQuestion(q.id)}
+                >
+                  Tasdiqlash
+                </button>
+                <button
+                  className="btn btn-outline"
+                  style={{ padding: "4px 10px", fontSize: "0.75rem", borderColor: "var(--danger)", color: "var(--danger)", background: "rgba(239, 68, 68, 0.03)" }}
+                  onClick={() => void handleRejectQuestion(q.id)}
+                >
+                  Rad etish
+                </button>
+              </>
+            )}
+            {isApproved && (
+              <button
+                className="btn btn-outline"
+                style={{ padding: "4px 10px", fontSize: "0.75rem", color: "var(--text-muted)" }}
+                onClick={() => void handleArchiveQuestion(q.id)}
+              >
+                Arxivlash
+              </button>
+            )}
+            <button
+              className="btn btn-outline"
+              style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+              onClick={() => {
+                setQbEditingQuestion(q);
+              }}
+            >
+              <Edit size={12} style={{ marginRight: "4px" }} />
+              Tahrirlash
+            </button>
+          </div>
+
+          {q.variant_allowed && (
+            <button
+              className="btn btn-outline"
+              style={{ padding: "4px 10px", fontSize: "0.75rem", borderColor: "var(--primary)", color: "var(--primary)" }}
+              onClick={() => {
+                if (isTestingThis) {
+                  setQbTestingVariantId("");
+                  setQbVariantResult(null);
+                } else {
+                  setQbTestingVariantId(q.id);
+                  setQbVariantParams(q.variant_template?.parameters || {});
+                  setQbVariantResult(null);
+                }
+              }}
+            >
+              <Sliders size={12} style={{ marginRight: "4px" }} />
+              {isTestingThis ? "Yopish" : "Variant sinash"}
+            </button>
+          )}
+        </div>
+
+        {/* Variant Testing Section */}
+        {isTestingThis && (
+          <div style={{ marginTop: "12px", borderTop: "2px dashed var(--border)", paddingTop: "12px" }}>
+            <h4 style={{ margin: "0 0 8px", fontSize: "0.8rem", color: "var(--primary)" }}>
+              Kanal parametrlari varianti ({q.variant_template?.template_type})
+            </h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "10px" }}>
+              {Object.keys(qbVariantParams).map((paramName) => (
+                <div key={paramName}>
+                  <label style={{ display: "block", fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "2px" }}>
+                    Parametr {paramName}
+                  </label>
+                  <input
+                    type="number"
+                    value={qbVariantParams[paramName] === undefined ? "" : qbVariantParams[paramName]}
+                    onChange={(e) => {
+                      const val = e.target.value === "" ? "" : Number(e.target.value);
+                      setQbVariantParams(prev => ({ ...prev, [paramName]: val }));
+                    }}
+                    style={{ width: "100%", padding: "6px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "0.75rem" }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex-end" style={{ marginBottom: "10px" }}>
+              <button
+                className="btn btn-primary"
+                style={{ padding: "4px 10px", fontSize: "0.75rem" }}
+                onClick={() => void handleGenerateVariantTest()}
+                disabled={isBusy}
+              >
+                Variant Generatsiya Qilish
+              </button>
+            </div>
+
+            {qbVariantResult && (
+              <div style={{ background: "rgba(59, 130, 246, 0.04)", border: "1px solid rgba(59, 130, 246, 0.15)", borderRadius: "8px", padding: "10px", marginTop: "8px" }}>
+                <p style={{ margin: "0 0 6px", fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Yangi generatsiya qilingan variant:
+                </p>
+                <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: "0.85rem", color: "var(--text-main)" }}>
+                  {qbVariantResult.question_text}
+                </p>
+                <div style={{ display: "flex", gap: "10px", fontSize: "0.75rem" }}>
+                  <div>Javob: <strong style={{ color: "var(--secondary)" }}>{qbVariantResult.correct_answer}</strong></div>
+                  <div>Qiyinchilik: <strong>{qbVariantResult.difficulty}</strong></div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderEditModal() {
+    if (!qbEditingQuestion) return null;
+    return (
+      <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", background: "rgba(0,0,0,0.5)", zIndex: 100, display: "grid", placeItems: "center", padding: "16px" }}>
+        <div className="card animate-fade-in" style={{ width: "100%", maxWidth: "500px", padding: "20px", background: "white", maxHeight: "90vh", overflowY: "auto" }}>
+          <div className="flex-between" style={{ borderBottom: "1px solid var(--border)", paddingBottom: "10px", marginBottom: "16px" }}>
+            <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800 }}>Savolni tahrirlash</h3>
+            <button
+              onClick={() => setQbEditingQuestion(null)}
+              style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--text-muted)" }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <form onSubmit={handleUpdateQuestion}>
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Savol matni</label>
+              <textarea
+                value={qbEditingQuestion.question_text || ""}
+                onChange={e => setQbEditingQuestion({ ...qbEditingQuestion, question_text: e.target.value })}
+                style={{ width: "100%", minHeight: "80px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem" }}
+                required
+              />
+            </div>
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Savol turi</label>
+              <select
+                value={qbEditingQuestion.question_type}
+                onChange={e => setQbEditingQuestion({ ...qbEditingQuestion, question_type: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem", background: "white" }}
+              >
+                <option value="numeric">Sonli yechim (Numeric)</option>
+                <option value="multiple_choice">Ko'p tanlovli (MCQ)</option>
+                <option value="short_answer">Qisqa matnli yechim</option>
+              </select>
+            </div>
+
+            {qbEditingQuestion.question_type === "multiple_choice" && (
+              <div style={{ marginBottom: "12px", border: "1px solid var(--border)", padding: "10px", borderRadius: "8px", background: "var(--background)" }}>
+                <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "6px", fontWeight: 600 }}>Variantlar va To'g'ri index (0-dan 3-gacha)</label>
+                {(qbEditingQuestion.options || ["", "", "", ""]).map((opt: string, idx: number) => (
+                  <div key={idx} style={{ display: "flex", gap: "6px", marginBottom: "6px", alignItems: "center" }}>
+                    <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>{String.fromCharCode(65 + idx)})</span>
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={e => {
+                        const newOpts = [...(qbEditingQuestion.options || ["", "", "", ""])];
+                        newOpts[idx] = e.target.value;
+                        setQbEditingQuestion({ ...qbEditingQuestion, options: newOpts });
+                      }}
+                      style={{ flex: 1, padding: "6px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "0.8rem" }}
+                      placeholder={`Variant ${String.fromCharCode(65 + idx)}`}
+                      required
+                    />
+                  </div>
+                ))}
+                <div style={{ marginTop: "10px" }}>
+                  <label style={{ display: "block", fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "2px" }}>To'g'ri variant indexi (0: A, 1: B, 2: C, 3: D)</label>
+                  <input
+                    type="number"
+                    min={0} max={3}
+                    value={qbEditingQuestion.correct_option_index ?? 0}
+                    onChange={e => setQbEditingQuestion({ ...qbEditingQuestion, correct_option_index: Number(e.target.value) })}
+                    style={{ width: "60px", padding: "6px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "0.8rem" }}
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginBottom: "12px" }}>
+              <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>To'g'ri javob</label>
+              <input
+                type="text"
+                value={qbEditingQuestion.correct_answer || ""}
+                onChange={e => setQbEditingQuestion({ ...qbEditingQuestion, correct_answer: e.target.value })}
+                style={{ width: "100%", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem" }}
+                required
+              />
+            </div>
+
+            <div style={{ marginBottom: "16px" }}>
+              <label style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "4px", fontWeight: 600 }}>Qiyinchilik darajasi (1-Oson, 2-O'rtacha, 3-Qiyin)</label>
+              <input
+                type="number"
+                min={1} max={3}
+                value={qbEditingQuestion.difficulty || 2}
+                onChange={e => setQbEditingQuestion({ ...qbEditingQuestion, difficulty: Number(e.target.value) })}
+                style={{ width: "80px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "0.8rem" }}
+                required
+              />
+            </div>
+
+            <div className="flex-end">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setQbEditingQuestion(null)}
+              >
+                Bekor qilish
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{ marginLeft: "8px" }}
+              >
+                Saqlash
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  function renderAddWizard() {
+    return (
+      <div className="animate-fade-in pb-20">
+        <div style={{ marginBottom: "1.5rem", marginTop: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.6rem", fontWeight: 800, margin: 0, color: "var(--text-main)", letterSpacing: "-0.03em" }}>
+            Yarating va Tekshiring
+          </h2>
+          <p style={{ margin: "4px 0 0", fontSize: "0.9rem", color: "var(--text-muted)", fontWeight: 500 }}>
+            Yangi dars, topshiriq yoki tekshirish turini tanlang
+          </p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "12px" }}>
+          <div 
+            className="card card-interactive" 
+            style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
+            onClick={() => {
+              setCurrentTab("classes");
+              setSelectedTeacherClassId("");
+            }}
+          >
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.1)", color: "var(--secondary)", display: "grid", placeItems: "center" }}>
+              <UsersRound size={24} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>Sinf Yaratish</h3>
+              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.3 }}>Yangi o'quvchilar guruhini qo'shish va ularga kod yuborish</p>
+            </div>
+            <ChevronRight size={18} color="var(--text-muted)" />
+          </div>
+
+          <div 
+            className="card card-interactive" 
+            style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
+            onClick={() => {
+              setCurrentTab("tools");
+              setToolsActiveView("diktant_checker");
+              setDiktantStep(1);
+            }}
+          >
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(59, 130, 246, 0.1)", color: "var(--primary)", display: "grid", placeItems: "center" }}>
+              <PenTool size={24} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>Diktant Tekshirish</h3>
+              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.3 }}>O'quvchilar yozgan diktant xatolarini rasm orqali AI tahlili bilan tekshirish</p>
+            </div>
+            <ChevronRight size={18} color="var(--text-muted)" />
+          </div>
+
+          <div 
+            className="card card-interactive" 
+            style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
+            onClick={() => {
+              setCurrentTab("tools");
+              setToolsActiveView("test_checker");
+              setTestStep(1);
+            }}
+          >
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(245, 158, 11, 0.1)", color: "var(--warning)", display: "grid", placeItems: "center" }}>
+              <FileCheck size={24} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>Test Tekshirish</h3>
+              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.3 }}>Yozma test javoblar varaqasini skanerlash va natijalarni hisoblash</p>
+            </div>
+            <ChevronRight size={18} color="var(--text-muted)" />
+          </div>
+
+          <div 
+            className="card card-interactive" 
+            style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
+            onClick={() => {
+              setCurrentTab("tools");
+              setToolsActiveView("control_work");
+              setCwStep(1);
+            }}
+          >
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", display: "grid", placeItems: "center" }}>
+              <BookOpen size={24} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700 }}>Nazorat Ishi</h3>
+              <p style={{ margin: "2px 0 0", fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.3 }}>Yozma nazorat ishlarining AI yordamida baholanishi va tahlil qilinishi</p>
+            </div>
+            <ChevronRight size={18} color="var(--text-muted)" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTeacherTools() {
+    if (toolsActiveView === "question_bank") return renderQuestionBank();
+    if (toolsActiveView === "diktant_checker") return renderDiktantChecker();
+    if (toolsActiveView === "test_checker") return renderTestChecker();
+    if (toolsActiveView === "control_work") return renderControlWorkChecker();
+    if (toolsActiveView === "paper_checker") return (
+      <div className="animate-fade-in pb-20">
+        <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}><ArrowLeft size={14} style={{ marginRight: "4px" }}/> Orqaga</button>
+        <div className="section-title"><h2>AI Paper Checker</h2></div>
+        <div className="card text-center" style={{ padding: "24px" }}>
+           <Camera size={40} style={{ opacity: 0.5, margin: "0 auto 12px" }} />
+           <p className="text-muted mb-3">Bu xususiyat endi Asosiy <b>Vazifalar</b> menyusi ichida to'g'ridan-to'g'ri ishlaydi.</p>
+           <button className="btn btn-primary" onClick={() => setCurrentTab("homeworks")}>Vazifalarga o'tish</button>
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="animate-fade-in pb-20">
+        <div className="section-title" style={{ marginBottom: "1.2rem" }}>
+          <h2>O'qituvchi vositalari</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            AI yordamida ishlaringizni osonlashtiring
+          </p>
+        </div>
+        
+        <div style={{ display: "grid", gap: "12px" }}>
+          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("question_bank")}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(59, 130, 246, 0.1)", display: "grid", placeItems: "center", color: "var(--primary)", flexShrink: 0 }}>
+              <BookOpen size={24} />
+            </div>
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>Savollar banki</h3>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Materiallardan savollar bazasi</p>
+            </div>
+          </button>
+
+          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("control_work")}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.1)", display: "grid", placeItems: "center", color: "var(--secondary)", flexShrink: 0 }}>
+              <FileCheck size={24} />
+            </div>
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>Nazorat ishlari</h3>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Yozma ishlarni rasm orqali tekshirish</p>
+            </div>
+          </button>
+
+          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("test_checker")}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(139, 92, 246, 0.1)", display: "grid", placeItems: "center", color: "#8b5cf6", flexShrink: 0 }}>
+              <ClipboardList size={24} />
+            </div>
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>Test Checker</h3>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Test javoblarini avtomatik tekshirish</p>
+            </div>
+          </button>
+
+          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("diktant_checker")}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(245, 158, 11, 0.1)", display: "grid", placeItems: "center", color: "var(--warning)", flexShrink: 0 }}>
+              <PenTool size={24} />
+            </div>
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>Diktant Checker</h3>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Imlo va diktantlarni tekshirish</p>
+            </div>
+          </button>
+          
+          <button className="card card-interactive flex-start" style={{ textAlign: "left", padding: "16px", border: "1px solid var(--border)", gap: "16px" }} onClick={() => setToolsActiveView("paper_checker")}>
+            <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "rgba(100, 116, 139, 0.1)", display: "grid", placeItems: "center", color: "var(--text-muted)", flexShrink: 0 }}>
+              <Camera size={24} />
+            </div>
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: "1rem", color: "var(--text-main)" }}>AI Paper Checker</h3>
+              <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>Vazifalar bo'limiga ko'chirildi</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderDiktantChecker() {
+    return (
+      <div className="animate-fade-in pb-20">
+        <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}>
+          <ArrowLeft size={14} style={{ marginRight: "4px" }}/> Orqaga
+        </button>
+        <div className="section-title" style={{ marginBottom: "1.2rem" }}>
+          <h2>Diktant tekshirish</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            O'quvchilarning yozma diktant ishlarini AI yordamida tekshiring
+          </p>
+        </div>
+
+        {diktantStep === 1 && (
+           <div className="card">
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>1. Sinf va O'quvchini tanlang</h3>
+              <select className="input-field" style={{ marginBottom: "16px" }} value={diktantStudent} onChange={e => setDiktantStudent(e.target.value)}>
+                 <option value="">Sinf va o'quvchini tanlang...</option>
+                 <option value="Ali Valiyev">8-A: Ali Valiyev</option>
+                 <option value="Madina Karimova">8-A: Madina Karimova</option>
+              </select>
+              <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setDiktantStep(2)} disabled={!diktantStudent}>Keyingi qadam</button>
+           </div>
+        )}
+
+        {diktantStep === 2 && (
+           <div className="card">
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>2. Original matn (Javob kaliti)</h3>
+              <textarea className="input-field" rows={5} style={{ marginBottom: "16px", resize: "none" }} placeholder="Bahor fasli boshlandi. Daraxtlar yashil libosga kirdi..." value={diktantText} onChange={e => setDiktantText(e.target.value)} />
+              <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setDiktantStep(3)} disabled={!diktantText.trim()}>Keyingi qadam</button>
+           </div>
+        )}
+
+        {diktantStep === 3 && (
+           <div className="card">
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem" }}>3. O'quvchi ishi</h3>
+              <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginBottom: "12px" }}>Matn to'liq ko'rinsin, rasm tiniq bo'lsin.</p>
+              <label className="file-picker" style={{ marginBottom: "16px", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px", border: "2px dashed var(--border)", borderRadius: "12px", cursor: "pointer", background: "var(--background)" }}>
+                <Camera size={32} color="var(--primary)" style={{ marginBottom: "8px" }} />
+                <span style={{ fontSize: "0.9rem", color: "var(--primary)", fontWeight: 600 }}>{diktantImage ? diktantImage.name : "Diktant rasmini yuklang"}</span>
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => setDiktantImage(e.target.files?.[0] || null)} />
+              </label>
+              <button className="btn btn-primary" style={{ width: "100%" }} disabled={!diktantImage || busyAction === "check-diktant"} onClick={() => void handleCheckDiktant()}>
+                {busyAction === "check-diktant" ? "Tekshirilmoqda..." : "AI bilan tekshirish"}
+              </button>
+           </div>
+        )}
+
+        {diktantStep === 4 && (
+           <div className="card" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "3rem 1rem", textAlign: "center" }}>
+              <RefreshCcw size={40} style={{ animation: "spin 1.5s linear infinite", marginBottom: "1rem", color: "var(--primary)" }} />
+              <h3 style={{ marginBottom: "8px", fontSize: "1.1rem" }}>AI diktantni tekshirmoqda...</h3>
+              <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: 0, lineHeight: 1.5 }}>
+                Yozuv o'qilmoqda...<br/>Original matn bilan solishtirilmoqda...
+              </p>
+           </div>
+        )}
+
+        {diktantStep === 5 && diktantResult && (
+           <div className="card animate-fade-in" style={{ padding: "0", overflow: "hidden" }}>
+              <div style={{ padding: "16px", background: "var(--surface)", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                 <div>
+                   <h3 style={{ margin: 0, fontSize: "1.1rem" }}>{diktantStudent}</h3>
+                   <span className="badge badge-green mt-1" style={{ fontSize: "0.75rem", display: "inline-block" }}>Yaxshi natija</span>
+                 </div>
+                 
+                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button className="icon-btn" style={{ padding: "4px 8px", background: "var(--border)", border: "none", borderRadius: "4px", fontSize: "1rem", fontWeight: "bold", cursor: "pointer" }} onClick={() => setDiktantResult({ ...diktantResult, score: Math.max(0, diktantResult.score - 1) })}>-</button>
+                    <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--primary)" }}>
+                       {diktantResult.score}
+                    </span>
+                    <button className="icon-btn" style={{ padding: "4px 8px", background: "var(--border)", border: "none", borderRadius: "4px", fontSize: "1rem", fontWeight: "bold", cursor: "pointer" }} onClick={() => setDiktantResult({ ...diktantResult, score: Math.min(diktantResult.max, diktantResult.score + 1) })}>+</button>
+                    <span style={{ fontSize: "1.1rem", color: "var(--text-muted)", marginLeft: "4px" }}>/ {diktantResult.max}</span>
+                 </div>
+              </div>
+              
+              <div style={{ padding: "16px" }}>
+                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
+                    <div style={{ background: "rgba(239, 68, 68, 0.05)", padding: "10px", borderRadius: "8px", textAlign: "center", border: "1px solid rgba(239, 68, 68, 0.1)" }}>
+                       <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--danger)" }}>{diktantResult.totalErrors}</div>
+                       <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Jami xato</div>
+                    </div>
+                    <div style={{ background: "rgba(245, 158, 11, 0.05)", padding: "10px", borderRadius: "8px", textAlign: "center", border: "1px solid rgba(245, 158, 11, 0.1)" }}>
+                       <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--warning)" }}>
+                         {diktantResult.errors.filter((e: any) => e.type === "Imlo xatosi").length}
+                       </div>
+                       <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Imlo</div>
+                    </div>
+                    <div style={{ background: "rgba(59, 130, 246, 0.05)", padding: "10px", borderRadius: "8px", textAlign: "center", border: "1px solid rgba(59, 130, 246, 0.1)" }}>
+                       <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--primary)" }}>
+                         {diktantResult.errors.filter((e: any) => e.type === "Tinish belgisi").length}
+                       </div>
+                       <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Tinish belgisi</div>
+                    </div>
+                 </div>
+
+                 <h4 style={{ margin: "0 0 12px", fontSize: "0.9rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Xatolar tahlili</h4>
+                 
+                 <div style={{ display: "grid", gap: "12px", marginBottom: "20px" }}>
+                   {diktantResult.errors.map((err: any, i: number) => (
+                      <div key={i} style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "12px", background: "var(--background)" }}>
+                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                           <select 
+                             className="input-field" 
+                             style={{ width: "auto", padding: "2px 8px", fontSize: "0.75rem", height: "26px", borderRadius: "6px" }}
+                             value={err.type}
+                             onChange={(e) => {
+                               const newErrors = [...diktantResult.errors];
+                               newErrors[i] = { ...newErrors[i], type: e.target.value };
+                               setDiktantResult({ ...diktantResult, errors: newErrors });
+                             }}
+                           >
+                             <option value="Imlo xatosi">Imlo xatosi</option>
+                             <option value="Tinish belgisi">Tinish belgisi</option>
+                             <option value="Tushib qolgan so'z">Tushib qolgan so'z</option>
+                             <option value="Ortiqcha so'z">Ortiqcha so'z</option>
+                             <option value="Noto'g'ri so'z">Noto'g'ri so'z</option>
+                             <option value="Katta/kichik harf">Katta/kichik harf</option>
+                           </select>
+
+                           <button 
+                             style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", display: "grid", placeItems: "center" }}
+                             onClick={() => {
+                               const newErrors = diktantResult.errors.filter((_: any, idx: number) => idx !== i);
+                               setDiktantResult({
+                                 ...diktantResult,
+                                 totalErrors: newErrors.length,
+                                 errors: newErrors
+                               });
+                             }}
+                           >
+                             <X size={16} />
+                           </button>
+                         </div>
+                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "0.85rem" }}>
+                           <div style={{ padding: "8px", background: "rgba(16, 185, 129, 0.05)", borderRadius: "6px" }}>
+                             <strong style={{ color: "var(--secondary)", display: "block", marginBottom: "4px", fontSize: "0.7rem" }}>ORIGINAL:</strong>
+                             {err.original}
+                           </div>
+                           <div style={{ padding: "8px", background: "rgba(239, 68, 68, 0.05)", borderRadius: "6px" }}>
+                             <strong style={{ color: "var(--danger)", display: "block", marginBottom: "4px", fontSize: "0.7rem" }}>O'QUVCHI:</strong>
+                             <span style={{ color: "var(--danger)", textDecoration: "underline wavy" }}>{err.student}</span>
+                           </div>
+                         </div>
+                      </div>
+                   ))}
+                 </div>
+
+                 <div style={{ display: "flex", gap: "8px" }}>
+                    <button className="btn btn-primary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} onClick={() => { setNotice("Natija tasdiqlandi!"); setDiktantStep(1); setDiktantImage(null); setDiktantText(""); setDiktantStudent(""); }}>
+                      <Check size={16}/> Tasdiqlash
+                    </button>
+                    <button className="btn btn-outline" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} onClick={() => setNotice("Jurnalga qo'shildi!")}>
+                      <BookType size={16}/> Jurnalga
+                    </button>
+                 </div>
+              </div>
+           </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderTestChecker() {
+    return (
+      <div className="animate-fade-in pb-20">
+        <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}>
+          <ArrowLeft size={14} style={{ marginRight: "4px" }}/> Orqaga
+        </button>
+        <div className="section-title" style={{ marginBottom: "1.2rem" }}>
+          <h2>Test Checker</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            Javoblarni kalit bilan avtomatik tekshirish
+          </p>
+        </div>
+
+        {testStep === 1 && (
+           <div className="card animate-fade-in">
+              <h3 style={{ marginBottom: "16px", fontSize: "1.1rem", fontWeight: 800 }}>Yangi Test Yaratish</h3>
+              <div style={{ marginBottom: "12px" }}>
+                <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Test Nomi</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  value={testName} 
+                  onChange={e => setTestName(e.target.value)} 
+                  placeholder="Algebra Test #3" 
+                />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "16px" }}>
+                <div>
+                  <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Sinf</label>
+                  <select className="input-field" value={testClass} onChange={e => setTestClass(e.target.value)}>
+                     <option value="8-A">8-A</option>
+                     <option value="9-B">9-B</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Savollar soni</label>
+                  <input 
+                    type="number" 
+                    className="input-field" 
+                    value={testQuestionCount} 
+                    onChange={e => setTestQuestionCount(Math.min(50, Math.max(1, Number(e.target.value))))} 
+                  />
+                </div>
+              </div>
+              <div style={{ marginBottom: "20px" }}>
+                <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Maksimal ball</label>
+                <input 
+                  type="number" 
+                  className="input-field" 
+                  value={testMaxScore} 
+                  onChange={e => setTestMaxScore(Math.max(1, Number(e.target.value)))} 
+                />
+              </div>
+              <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => setTestStep(2)}>Kalit yaratish</button>
+           </div>
+        )}
+
+        {testStep === 2 && (
+           <div className="card animate-fade-in">
+              <div className="flex-between" style={{ marginBottom: "16px" }}>
+                 <h3 style={{ fontSize: "1rem", margin: 0, fontWeight: 700 }}>Javob kalitlari</h3>
+                 <span className="badge badge-gray" style={{ background: "rgba(59, 130, 246, 0.1)", color: "var(--primary)" }}>{testQuestionCount} ta savol</span>
+              </div>
+              <div style={{ maxHeight: "280px", overflowY: "auto", paddingRight: "4px", display: "grid", gap: "10px", marginBottom: "20px" }}>
+                 {Array.from({ length: testQuestionCount }, (_, idx) => idx + 1).map(q => (
+                    <div key={q} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                       <span style={{ width: "24px", fontWeight: 700, color: "var(--text-muted)", textAlign: "right" }}>{q}.</span>
+                       <div style={{ display: "flex", gap: "8px", flex: 1 }}>
+                          {['A', 'B', 'C', 'D'].map(opt => (
+                             <button key={opt} 
+                               style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: testAnswers[q] === opt ? "var(--primary)" : "var(--background)", color: testAnswers[q] === opt ? "white" : "var(--text-main)", fontWeight: 600, transition: "all 0.2s", cursor: "pointer" }}
+                               onClick={() => setTestAnswers({...testAnswers, [q]: opt})}
+                             >
+                               {opt}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+                 ))}
+              </div>
+              <button className="btn btn-primary" style={{ width: "100%" }} onClick={() => { setTestKeySaved(testAnswers); setTestStep(3); }}>Kalitni saqlash</button>
+           </div>
+        )}
+
+        {testStep === 3 && (
+           <div className="card animate-fade-in">
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem", fontWeight: 700 }}>O'quvchi javoblari</h3>
+              <select className="input-field" style={{ marginBottom: "16px" }} value={testStudent} onChange={e => setTestStudent(e.target.value)}>
+                 <option value="">O'quvchini tanlang...</option>
+                 <option value="Ali Valiyev">Ali Valiyev</option>
+                 <option value="Madina Karimova">Madina Karimova</option>
+              </select>
+              
+              <div style={{ marginBottom: "16px", padding: "16px", background: "rgba(59, 130, 246, 0.05)", borderRadius: "8px", border: "1px dashed var(--primary)", textAlign: "center" }}>
+                 <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "12px" }}>O'quvchi javoblarini kiriting yoki rasmga oling:</p>
+                 <label className="file-picker" style={{ marginBottom: "12px", display: "flex", flexDirection: "column", alignItems: "center", padding: "16px", border: "1px dashed var(--border)", borderRadius: "10px", cursor: "pointer", background: "white" }}>
+                   <Camera size={24} color="var(--primary)" style={{ marginBottom: "6px" }} />
+                   <span style={{ fontSize: "0.82rem", color: "var(--primary)", fontWeight: 700 }}>{testImage ? testImage.name : "Test javob varaqasi rasmini tanlang"}</span>
+                   <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => setTestImage(e.target.files?.[0] || null)} />
+                 </label>
+                 <div style={{ display: "flex", gap: "8px" }}>
+                    <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => { setTestStudentAnswers({}); setTestStep(4); }} disabled={!testStudent}>Qo'lda kiritish</button>
+                    <button className="btn btn-primary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} disabled={!testStudent || !testImage || busyAction === "scan-test"} onClick={() => void handleCheckTestScan()}>
+                      <Camera size={16}/> {busyAction === "scan-test" ? "Skan..." : "Skaner"}
+                    </button>
+                 </div>
+              </div>
+           </div>
+        )}
+
+        {testStep === 6 && (
+           <div className="card text-center animate-fade-in" style={{ padding: "3rem 1rem" }}>
+              <RefreshCcw size={40} style={{ animation: "spin 1.5s linear infinite", marginBottom: "1rem", color: "var(--primary)", margin: "0 auto 1rem" }} />
+              <h4>Javoblar tekshirilmoqda...</h4>
+           </div>
+        )}
+
+        {testStep === 4 && (
+           <div className="card animate-fade-in">
+              <h3 style={{ marginBottom: "12px", fontSize: "1rem", color: "var(--primary)", fontWeight: 700 }}>{testStudent || "O'quvchi"} javoblari</h3>
+              <div style={{ maxHeight: "280px", overflowY: "auto", paddingRight: "4px", display: "grid", gap: "10px", marginBottom: "20px" }}>
+                 {Array.from({ length: testQuestionCount }, (_, idx) => idx + 1).map(q => (
+                    <div key={q} style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                       <span style={{ width: "24px", fontWeight: 700, color: "var(--text-muted)", textAlign: "right" }}>{q}.</span>
+                       <div style={{ display: "flex", gap: "8px", flex: 1 }}>
+                          {['A', 'B', 'C', 'D'].map(opt => (
+                             <button key={opt} 
+                               style={{ flex: 1, padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: testStudentAnswers[q] === opt ? "var(--text-main)" : "var(--background)", color: testStudentAnswers[q] === opt ? "white" : "var(--text-main)", fontWeight: 600, transition: "all 0.2s", cursor: "pointer" }}
+                               onClick={() => setTestStudentAnswers({...testStudentAnswers, [q]: opt})}
+                             >
+                               {opt}
+                             </button>
+                          ))}
+                       </div>
+                    </div>
+                 ))}
+              </div>
+              <button className="btn btn-primary" style={{ width: "100%" }} disabled={busyAction === "check-test"} onClick={() => void handleCheckTestManual()}>
+                {busyAction === "check-test" ? "Tekshirilmoqda..." : "Tekshirish"}
+              </button>
+           </div>
+        )}
+
+        {testStep === 5 && testResult && (
+           <div className="card animate-fade-in">
+              <div className="flex-between" style={{ marginBottom: "20px", borderBottom: "1px solid var(--border)", paddingBottom: "16px" }}>
+                 <div>
+                    <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800 }}>{testStudent}</h3>
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{testName}</span>
+                 </div>
+                 <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: "1.8rem", fontWeight: 800, color: "var(--secondary)" }}>{Math.round((testResult.correct / testQuestionCount) * 100)}%</div>
+                    <div style={{ fontSize: "0.9rem", color: "var(--text-main)", fontWeight: 700 }}>{testResult.score} / {testResult.max}</div>
+                 </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "12px", marginBottom: "20px" }}>
+                 <div style={{ flex: 1, background: "rgba(16, 185, 129, 0.1)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(16, 185, 129, 0.2)", textAlign: "center" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>To'g'ri</div>
+                    <div style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--secondary)" }}>{testResult.correct}</div>
+                 </div>
+                 <div style={{ flex: 1, background: "rgba(239, 68, 68, 0.1)", padding: "12px", borderRadius: "8px", border: "1px solid rgba(239, 68, 68, 0.2)", textAlign: "center" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>Xato</div>
+                    <div style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--danger)" }}>{testResult.wrong}</div>
+                 </div>
+              </div>
+
+              <div style={{ marginBottom: "24px" }}>
+                 <h4 style={{ margin: "0 0 8px", fontSize: "0.9rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Xato qilingan savollar:</h4>
+                 <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    {testResult.wrongQs.map((q: number) => (
+                       <span key={q} style={{ width: "32px", height: "32px", borderRadius: "8px", background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", display: "grid", placeItems: "center", fontWeight: 700, border: "1px solid rgba(239, 68, 68, 0.2)" }}>{q}</span>
+                    ))}
+                    {testResult.wrongQs.length === 0 && (
+                      <span style={{ fontSize: "0.85rem", color: "var(--secondary)", fontWeight: 600 }}>Mukammal! Hech qanday xato yo'q.</span>
+                    )}
+                 </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                 <button className="btn btn-primary" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Tasdiqlandi"); setTestStep(3); setTestStudent(""); setTestStudentAnswers({}); setTestImage(null); }}><Check size={16}/> Tasdiqlash</button>
+                 <button className="btn btn-outline" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Jurnalga qo'shildi!"); setToolsActiveView("home"); }}><BookType size={16}/> Jurnalga</button>
+              </div>
+           </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderControlWorkChecker() {
+    return (
+      <div className="animate-fade-in pb-20">
+        <button className="btn btn-outline" onClick={() => setToolsActiveView("home")} style={{ marginBottom: "1rem", padding: "4px 10px", fontSize: "0.8rem" }}>
+          <ArrowLeft size={14} style={{ marginRight: "4px" }}/> Orqaga
+        </button>
+        <div className="section-title" style={{ marginBottom: "1.2rem" }}>
+          <h2>Nazorat ishlari</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            Yozma nazorat ishlarini rasm orqali AI yordamida tekshiring
+          </p>
+        </div>
+
+        {cwStep === 1 && (
+           <div className="card animate-fade-in">
+              <h3 style={{ marginBottom: "16px", fontSize: "1.1rem", fontWeight: 800 }}>Yangi Nazorat Ishi</h3>
+              <div style={{ marginBottom: "12px" }}>
+                <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Nazorat nomi</label>
+                <input 
+                  type="text" 
+                  className="input-field" 
+                  value={cwName} 
+                  onChange={e => setCwName(e.target.value)} 
+                  placeholder="Kvadrat tenglamalar nazorat ishi" 
+                />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                <div>
+                  <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Sinf</label>
+                  <select className="input-field" value={cwClass} onChange={e => setCwClass(e.target.value)}>
+                     <option value="8-A">8-A</option>
+                     <option value="9-B">9-B</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Max ball</label>
+                  <input 
+                    type="number" 
+                    className="input-field" 
+                    value={cwMaxScore} 
+                    onChange={e => setCwMaxScore(Math.max(1, Number(e.target.value)))} 
+                  />
+                </div>
+              </div>
+              <div style={{ marginBottom: "16px" }}>
+                <label className="text-muted" style={{ fontSize: "0.8rem", display: "block", marginBottom: "4px" }}>Fan</label>
+                <select className="input-field" value={cwSubject} onChange={e => setCwSubject(e.target.value)}>
+                   <option value="Matematika">Matematika</option>
+                   <option value="Fizika">Fizika</option>
+                   <option value="Kimyo">Kimyo</option>
+                </select>
+              </div>
+              <button className="btn btn-primary" style={{ width: "100%", marginTop: "8px" }} onClick={() => setCwStep(2)}>Yaratish</button>
+           </div>
+        )}
+
+        {cwStep === 2 && (
+           <div className="card animate-fade-in">
+              <div className="flex-between" style={{ marginBottom: "16px" }}>
+                 <h3 style={{ margin: 0, fontSize: "1rem", fontWeight: 700 }}>Tekshirish</h3>
+                 <span className="badge badge-gray" style={{ background: "rgba(139, 92, 246, 0.1)", color: "#8b5cf6" }}>{cwSubject}</span>
+              </div>
+              <select className="input-field" style={{ marginBottom: "16px" }} value={cwStudent} onChange={e => setCwStudent(e.target.value)}>
+                 <option value="">O'quvchini tanlang...</option>
+                 <option value="Ali Valiyev">Ali Valiyev</option>
+                 <option value="Madina Karimova">Madina Karimova</option>
+              </select>
+
+              <label className="file-picker" style={{ marginBottom: "16px", display: "flex", flexDirection: "column", alignItems: "center", padding: "24px", border: "2px dashed var(--border)", borderRadius: "12px", cursor: "pointer", background: "var(--background)" }}>
+                <Camera size={32} color="var(--primary)" style={{ marginBottom: "8px" }} />
+                <span style={{ fontSize: "0.9rem", color: "var(--primary)", fontWeight: 600 }}>{cwImage ? cwImage.name : "Yozma ish rasmini yuklang"}</span>
+                <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => setCwImage(e.target.files?.[0] || null)} />
+              </label>
+
+              <button className="btn btn-primary" style={{ width: "100%" }} disabled={!cwImage || !cwStudent || busyAction === "check-control-work"} onClick={() => void handleCheckControlWork()}>
+                {busyAction === "check-control-work" ? "Tekshirilmoqda..." : "AI bilan tekshirish"}
+              </button>
+           </div>
+        )}
+
+        {cwStep === 3 && (
+           <div className="card text-center animate-fade-in" style={{ padding: "3rem 1rem" }}>
+              <RefreshCcw size={40} style={{ animation: "spin 1.5s linear infinite", marginBottom: "1rem", color: "var(--primary)", margin: "0 auto 1rem" }} />
+              <h3 style={{ fontSize: "1.1rem" }}>Nazorat ishi tahlil qilinmoqda...</h3>
+              <p className="text-muted mt-2" style={{ fontSize: "0.85rem" }}>Yozuvlar o'qilmoqda va yechimlar tekshirilmoqda...</p>
+           </div>
+        )}
+
+        {cwStep === 4 && cwResult && (
+           <div className="card animate-fade-in">
+              <div className="flex-between mb-3">
+                 <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800 }}>{cwStudent}</h3>
+                 
+                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button className="icon-btn" style={{ padding: "4px 8px", background: "var(--border)", border: "none", borderRadius: "4px", fontSize: "1rem", fontWeight: "bold", cursor: "pointer" }} onClick={() => setCwResult({ ...cwResult, score: Math.max(0, cwResult.score - 1) })}>-</button>
+                    <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "var(--primary)" }}>
+                       {cwResult.score}
+                    </span>
+                    <button className="icon-btn" style={{ padding: "4px 8px", background: "var(--border)", border: "none", borderRadius: "4px", fontSize: "1rem", fontWeight: "bold", cursor: "pointer" }} onClick={() => setCwResult({ ...cwResult, score: Math.min(cwResult.max, cwResult.score + 1) })}>+</button>
+                    <span style={{ fontSize: "1.1rem", color: "var(--text-muted)", marginLeft: "4px" }}>/ {cwResult.max}</span>
+                 </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "20px" }}>
+                 <div style={{ padding: "12px", background: "var(--background)", borderRadius: "8px", textAlign: "center", border: "1px solid var(--border)" }}>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--secondary)" }}>{cwResult.correct}</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>To'g'ri</div>
+                 </div>
+                 <div style={{ padding: "12px", background: "var(--background)", borderRadius: "8px", textAlign: "center", border: "1px solid var(--border)" }}>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--warning)" }}>{cwResult.partial}</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Qisman</div>
+                 </div>
+                 <div style={{ padding: "12px", background: "var(--background)", borderRadius: "8px", textAlign: "center", border: "1px solid var(--border)" }}>
+                    <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--danger)" }}>{cwResult.wrong}</div>
+                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Xato</div>
+                 </div>
+              </div>
+
+              <div style={{ marginBottom: "20px", display: "grid", gap: "10px" }}>
+                 {cwResult.problems && cwResult.problems.map((prob: any, idx: number) => (
+                    <div key={idx} className="card" style={{ padding: "12px", border: "1px solid var(--border)", background: "var(--background)" }}>
+                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                          <span className={`badge ${prob.status === 'Xato' ? 'badge-orange' : 'badge-gray'}`} style={{ fontSize: "0.75rem" }}>{prob.status}</span>
+                          <button 
+                            style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", display: "grid", placeItems: "center" }}
+                            onClick={() => {
+                               const newProbs = cwResult.problems.filter((_: any, i: number) => i !== idx);
+                               const correct = newProbs.filter((p: any) => p.status === "To'g'ri").length;
+                               const partial = newProbs.filter((p: any) => p.status === "Qisman").length;
+                               const wrong = newProbs.filter((p: any) => p.status === "Xato").length;
+                               setCwResult({ ...cwResult, problems: newProbs, correct, partial, wrong });
+                            }}
+                          >
+                             <X size={16} />
+                          </button>
+                       </div>
+                       <input 
+                         type="text" 
+                         className="input-field" 
+                         style={{ fontSize: "0.85rem", padding: "6px 8px", background: "var(--surface)", border: "1px solid var(--border)", margin: 0 }}
+                         value={prob.desc} 
+                         onChange={(e) => {
+                            const newProbs = [...cwResult.problems];
+                            newProbs[idx] = { ...newProbs[idx], desc: e.target.value };
+                            setCwResult({ ...cwResult, problems: newProbs });
+                         }}
+                       />
+                    </div>
+                 ))}
+                 {(!cwResult.problems || cwResult.problems.length === 0) && (
+                    <span style={{ fontSize: "0.85rem", color: "var(--secondary)", fontWeight: 600, textAlign: "center" }}>Hech qanday muammo topilmadi!</span>
+                 )}
+              </div>
+
+              <div style={{ display: "flex", gap: "8px" }}>
+                 <button className="btn btn-primary" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Tasdiqlandi"); setCwStep(2); setCwStudent(""); setCwImage(null); }}><Check size={16}/> Tasdiqlash</button>
+                 <button className="btn btn-outline" style={{ flex: 1, display: "flex", justifyContent: "center", alignItems: "center", gap: "6px" }} onClick={() => { setNotice("Jurnalga qo'shildi!"); setToolsActiveView("home"); }}><BookType size={16}/> Jurnalga</button>
+              </div>
+           </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderJournal() {
+    const mockStudents = [
+      { id: "1", name: "Ali Valiyev", avg: 85, scores: [100, 80, 75, 90] },
+      { id: "2", name: "Malika Sobirova", avg: 92, scores: [90, 95, 100, 85] },
+      { id: "3", name: "Sardor Oripov", avg: 68, scores: [60, 70, 55, 80] },
+      { id: "4", name: "Nigina Azimova", avg: 74, scores: [80, 60, 75, 80] },
+    ];
+    return (
+      <div className="animate-fade-in pb-20">
+        <div className="section-title" style={{ marginBottom: "1.2rem" }}>
+          <h2>O'qituvchi Jurnali</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            O'quvchilarning baholari va o'zlashtirish tahlili
+          </p>
+        </div>
+        
+        <div className="card" style={{ marginBottom: "16px", background: "linear-gradient(135deg, var(--surface) 0%, rgba(139, 92, 246, 0.05) 100%)" }}>
+          <div className="flex-between" style={{ marginBottom: "12px" }}>
+            <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--text-main)" }}>Sinf o'zlashtirishi</h3>
+            <span style={{ fontSize: "1.2rem", fontWeight: 800, color: "#8b5cf6" }}>80%</span>
+          </div>
+          <div style={{ width: "100%", height: "8px", background: "var(--border)", borderRadius: "4px", overflow: "hidden" }}>
+            <div style={{ width: "80%", height: "100%", background: "#8b5cf6", borderRadius: "4px" }}></div>
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "10px", margin: 0 }}>
+            O'tgan haftaga nisbatan +5% o'sish
+          </p>
+        </div>
+
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "16px", borderBottom: "1px solid var(--border)", background: "rgba(0,0,0,0.02)" }}>
+            <h3 style={{ margin: 0, fontSize: "0.95rem" }}>O'quvchilar ro'yxati</h3>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {mockStudents.map((s, idx) => (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", padding: "12px 16px", borderBottom: idx !== mockStudents.length - 1 ? "1px solid var(--border)" : "none" }}>
+                <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "var(--primary)", color: "white", display: "grid", placeItems: "center", fontSize: "0.8rem", fontWeight: 800, marginRight: "12px" }}>
+                  {initials(s.name)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--text-main)" }}>{s.name}</div>
+                  <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+                    {s.scores.map((score, i) => (
+                      <div key={i} style={{ 
+                        width: "16px", height: "16px", borderRadius: "4px", 
+                        background: score >= 85 ? "var(--secondary)" : score >= 70 ? "var(--warning)" : "var(--danger)",
+                        opacity: 0.8
+                      }} title={`${score}%`} />
+                    ))}
+                  </div>
+                </div>
+                <div style={{ fontSize: "1rem", fontWeight: 800, color: "var(--text-main)" }}>
+                  {s.avg}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPractice() {
+    const revisionItems = homeworks
+      .filter((homework) => homework.student_status === "submitted")
+      .map((homework, index) => ({
+        id: homework.id,
+        title: homework.title,
+        subject: homework.subject,
+        score: homework.latest_percentage ?? (index === 0 ? 84 : 92),
+        focus: (homework.latest_percentage ?? 100) < 80 ? "Xatolarni qayta ishlash" : "Mustahkamlash",
+      }));
+    const revisionList = revisionItems.length
+      ? revisionItems
+      : [
+          { id: "rev_quad", title: "Kvadrat tenglamalar", subject: "Matematika", score: 84, focus: "Xatolarni qayta ishlash" },
+          { id: "rev_linear", title: "Chiziqli tenglamalar", subject: "Matematika", score: 92, focus: "Mustahkamlash" },
+        ];
+
+    // Screen 8: Practice Question
+    if (studentPracticeStep === "question") {
+      const handleNumpad = (val: string) => {
+        if (val === "back") {
+          setStudentPracticeInput(prev => prev.slice(0, -1));
+        } else {
+          setStudentPracticeInput(prev => prev + val);
+        }
+      };
+
+      return (
+        <div className="animate-fade-in pb-20">
+          {/* Header row */}
+          <div className="flex-between" style={{ marginBottom: "1rem" }}>
+            <button
+              className="icon-btn"
+              style={{ border: "none", background: "rgba(0,0,0,0.05)", width: "32px", height: "32px", borderRadius: "50%", display: "grid", placeItems: "center" }}
+              onClick={() => setStudentPracticeStep("list")}
+            >
+              <X size={16} color="var(--text-main)" />
+            </button>
+            <div className="flex-start" style={{ gap: "10px" }}>
+              <div className="flex-start" style={{ gap: "4px", color: "var(--danger)" }}>
+                <Flame size={18} fill="var(--danger)" />
+                <span style={{ fontSize: "0.85rem", fontWeight: 800 }}>{studentStreak} kun</span>
+              </div>
+              <span className="badge badge-green" style={{ fontSize: "0.75rem", fontWeight: 800 }}>+15 XP</span>
+            </div>
+          </div>
+
+          {/* Segmented step progress */}
+          <div style={{ display: "flex", gap: "4px", marginBottom: "1.2rem" }}>
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((step) => {
+              let bg = "var(--border)";
+              if (step < 3) bg = "var(--green)";
+              if (step === 3) bg = "var(--primary)";
+              return (
+                <div key={step} style={{ flex: 1, height: "6px", background: bg, borderRadius: "3px" }}></div>
+              );
+            })}
+          </div>
+          <div className="flex-between" style={{ marginBottom: "1rem", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: 700 }}>
+            <span>Mavzu: Kvadrat tenglamalar</span>
+            <span>Takrorlash: 3 / 10</span>
+          </div>
+
+          {/* Math question card */}
+          <div className="card" style={{ padding: "1.8rem 1.5rem", borderRadius: "18px", border: "1px solid var(--border)", textAlign: "center", marginBottom: "1.2rem", background: "white" }}>
+            <p style={{ margin: "0 0 8px", fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 600 }}>TENGLAMANING ILDIZLARINI TOPING</p>
+            <h2 style={{ fontSize: "2rem", fontWeight: 900, margin: "0 0 8px", letterSpacing: "1px", color: "var(--text-main)" }}>
+              2xÂ² - 5x - 3 = 0
+            </h2>
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--primary)", fontWeight: 700 }}>Kichik ildizini kiriting</p>
+          </div>
+
+          {/* Answer input */}
+          <div style={{ margin: "0 auto 1.5rem", maxWidth: "240px", position: "relative" }}>
+            <input
+              type="text"
+              readOnly
+              value={studentPracticeInput}
+              placeholder="Javob"
+              style={{ width: "100%", padding: "12px", borderRadius: "12px", border: "2px solid var(--primary)", fontSize: "1.4rem", fontWeight: 800, textAlign: "center", background: "white", color: "var(--text-main)" }}
+            />
+            {studentPracticeInput && (
+              <button
+                onClick={() => setStudentPracticeInput("")}
+                style={{ position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)", border: "none", background: "none", fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)" }}
+              >
+                Tozalash
+              </button>
+            )}
+          </div>
+
+          {/* Custom numpad */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", maxWidth: "320px", margin: "0 auto 1.5rem" }}>
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "-", "0", "."].map((val) => (
+              <button
+                key={val}
+                type="button"
+                className="btn btn-outline"
+                style={{ height: "48px", borderRadius: "10px", fontSize: "1.1rem", fontWeight: 800, border: "1px solid var(--border)", background: "white" }}
+                onClick={() => handleNumpad(val)}
+              >
+                {val}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ gridColumn: "span 3", height: "44px", borderRadius: "10px", fontSize: "0.9rem", fontWeight: 800, border: "1px solid var(--border)", background: "#fee2e2", color: "var(--danger)" }}
+              onClick={() => handleNumpad("back")}
+            >
+              âŒ« O'chirish
+            </button>
+          </div>
+
+          {/* Submit */}
+          <button
+            className="btn btn-primary"
+            style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.8rem" }}
+            onClick={() => setStudentPracticeStep("complete")}
+          >
+            Tekshirish
+          </button>
+        </div>
+      );
+    }
+
+    // Screen 9: Practice Session Complete
+    if (studentPracticeStep === "complete") {
+      const handleFinishPractice = () => {
+        setStudentXP(prev => prev + 15);
+        setStudentStreak(prev => prev + 1);
+        setStudentPracticeStep("list");
+      };
+
+      return (
+        <div className="animate-fade-in pb-20 flex-center" style={{ flexDirection: "column", minHeight: "85vh", textAlign: "center", padding: "1rem" }}>
+          <div style={{ position: "relative", marginBottom: "1.5rem" }}>
+            <div style={{ width: "90px", height: "90px", borderRadius: "50%", background: "rgba(16, 185, 129, 0.1)", display: "grid", placeItems: "center", margin: "0 auto" }}>
+              <Trophy size={48} color="var(--warning)" />
+            </div>
+            <div style={{ position: "absolute", top: -5, right: -5, animation: "bounce 2s infinite" }}>ðŸŽ‰</div>
+          </div>
+
+          <h2 style={{ fontSize: "1.5rem", fontWeight: 900, margin: "0 0 6px", color: "var(--text-main)" }}>Takrorlash yakunlandi!</h2>
+          <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0 0 1.5rem" }}>Oldin ishlangan misollar qayta mustahkamlandi</p>
+
+          {/* Stats grid */}
+          <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", width: "100%", marginBottom: "1.5rem" }}>
+            <div className="card" style={{ padding: "10px", margin: 0, border: "1px solid var(--border)", background: "white" }}>
+              <CheckCircle size={18} color="var(--green)" style={{ margin: "0 auto 4px" }} />
+              <div style={{ fontSize: "1rem", fontWeight: 800 }}>8 / 10</div>
+              <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", fontWeight: 600 }}>To'g'ri</span>
+            </div>
+            <div className="card" style={{ padding: "10px", margin: 0, border: "1px solid var(--border)", background: "white" }}>
+              <Star size={18} color="var(--warning)" style={{ margin: "0 auto 4px" }} />
+              <div style={{ fontSize: "1rem", fontWeight: 800 }}>+15 XP</div>
+              <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", fontWeight: 600 }}>Tajriba</span>
+            </div>
+            <div className="card" style={{ padding: "10px", margin: 0, border: "1px solid var(--border)", background: "white" }}>
+              <Flame size={18} color="var(--danger)" style={{ margin: "0 auto 4px" }} />
+              <div style={{ fontSize: "1rem", fontWeight: 800 }}>13 kun</div>
+              <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", fontWeight: 600 }}>Streak</span>
+            </div>
+          </div>
+
+          {/* Badge Achievement Card */}
+          <div className="card" style={{ padding: "14px 16px", borderRadius: "14px", border: "1px solid rgba(59, 130, 246, 0.2)", background: "rgba(59, 130, 246, 0.03)", display: "flex", gap: "12px", alignItems: "center", textAlign: "left", width: "100%", marginBottom: "1.5rem" }}>
+            <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "linear-gradient(135deg, #3b82f6, #8b5cf6)", color: "white", display: "grid", placeItems: "center", fontSize: "1.1rem" }}>
+              ðŸŽ–ï¸
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: "0.85rem", fontWeight: 800 }}>Yangi Yutuq!</h4>
+              <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--text-muted)" }}>Siz <strong>'Kvadratlar qiroli'</strong> nishonini qo'lga kiritdingiz!</p>
+            </div>
+          </div>
+
+          <button
+            className="btn btn-primary"
+            style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.75rem", marginBottom: "10px" }}
+            onClick={handleFinishPractice}
+          >
+            Davom etish
+          </button>
+          <button
+            className="btn btn-outline"
+            style={{ width: "100%", justifyContent: "center", fontWeight: 700, padding: "0.75rem" }}
+            onClick={handleFinishPractice}
+          >
+            Darslarga qaytish
+          </button>
+        </div>
+      );
+    }
+
+    // Screen 7: Revision Home
+    return (
+      <div className="animate-fade-in pb-20">
+        <div className="section-title">
+          <h2>Takrorlash</h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: "4px" }}>
+            Oldin ishlangan misollarni qayta mustahkamlash
+          </p>
+        </div>
+
+        {/* Continue card */}
+        <div className="card" style={{ background: "linear-gradient(135deg, var(--secondary), #10b981)", color: "white", border: "none", padding: "1.2rem", borderRadius: "16px", marginBottom: "1.2rem" }}>
+          <p className="eyebrow" style={{ color: "rgba(255,255,255,0.8)", fontSize: "0.7rem", margin: 0, fontWeight: 700 }}>QAYTA ISHLASH</p>
+          <h3 style={{ color: "white", fontSize: "1.15rem", margin: "6px 0 4px", fontWeight: 700 }}>{revisionList[0]?.title || "Kvadrat tenglamalar"}</h3>
+          <div className="flex-between" style={{ fontSize: "0.75rem", margin: "8px 0 4px", opacity: 0.9 }}>
+            <span>Oxirgi natija: {revisionList[0]?.score ?? 84}%</span>
+            <span>{revisionList[0]?.subject || "Matematika"}</span>
+          </div>
+          <div style={{ width: "100%", height: "6px", background: "rgba(255,255,255,0.25)", borderRadius: "3px", overflow: "hidden", marginBottom: "12px" }}>
+            <div style={{ width: "80%", height: "100%", background: "white" }}></div>
+          </div>
+          <button className="btn" style={{ background: "white", color: "var(--secondary)", fontWeight: 800, fontSize: "0.8rem", padding: "6px 12px", borderRadius: "8px" }} onClick={() => setStudentPracticeStep("question")}>
+            Qayta ishlash
+          </button>
+        </div>
+
+        <h3 style={{ fontSize: "0.9rem", fontWeight: 800, margin: "0 0 10px", color: "var(--text-muted)", textTransform: "uppercase" }}>
+          Oldin ishlangan misollar
+        </h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {revisionList.map((item) => {
+            const meta = getSubjectMeta(item.subject);
+            const needsWork = item.score < 80;
+            return (
+              <div className="card" key={item.id} style={{ padding: "14px", border: needsWork ? "1px solid rgba(239,68,68,0.22)" : "1px solid var(--border)", position: "relative" }} onClick={() => setStudentPracticeStep("question")}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "8px" }}>
+                  <span className={`badge ${needsWork ? "badge-orange" : "badge-green"}`} style={{ fontSize: "0.65rem", padding: "2px 6px" }}>{item.focus}</span>
+                  <span style={{ fontSize: "0.7rem", color: meta.color, fontWeight: 800 }}>{item.score}%</span>
+                </div>
+                <div className="flex-start" style={{ gap: "10px" }}>
+                  <span style={{ width: 36, height: 36, borderRadius: "10px", background: meta.bg, color: meta.color, display: "grid", placeItems: "center", flexShrink: 0 }}>{meta.icon}</span>
+                  <div>
+                    <h4 style={{ margin: "0 0 4px", fontSize: "0.95rem", fontWeight: 800 }}>{item.title}</h4>
+                    <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)" }}>{item.subject} bo'yicha qayta ishlash</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  function renderTutor() {
+    const tutorInsights = buildProgressInsights(homeworks, studentSubmissionsByHomework);
+    const tutorMistakes = tutorInsights.mistakes.length
+      ? tutorInsights.mistakes
+      : [
+          {
+            label: "Diskriminantda ishora xatosi",
+            suggestion: "c manfiy bo'lsa, -4ac musbat qiymat beradi. Shuning uchun D = 25 - (-24) = 49 bo'ladi.",
+            count: 1,
+            homeworks: ["Chiziqli tenglamalar sistemasi"],
+            problems: ["3"],
+          },
+        ];
+    const activeMistake = tutorMistakes[0];
+
+    const handleSendTutor = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!user || !studentTutorInput.trim()) return;
+
+      const messageText = studentTutorInput.trim();
+      const history = studentTutorChat.map(({ sender, text }) => ({ sender, text })).slice(-6);
+      const newUserMsg = { sender: "user" as const, text: messageText, time: "Hozir" };
+      setStudentTutorChat(prev => [...prev, newUserMsg]);
+      setStudentTutorInput("");
+      setBusyAction("student-tutor");
+      setError("");
+
+      try {
+        const reply = await sendTutorMessage(user.id, {
+          message: messageText,
+          homeworkId: studentSelectedHomeworkId || undefined,
+          history,
+        });
+        setStudentTutorChat(prev => [
+          ...prev,
+          {
+            sender: "ai" as const,
+            text: reply.answer || `${activeMistake.label}: ${activeMistake.suggestion || "Bu xatoni qayta yechishda har bir amalni alohida yozib chiqing."}`,
+            time: "Hozir"
+          }
+        ]);
+      } catch (caught) {
+        setError(getErrorMessage(caught));
+        setStudentTutorChat(prev => [
+          ...prev,
+          {
+            sender: "ai" as const,
+            text: "AI tutor hozir javob bera olmadi. Groq API kaliti yoki backend ulanishini tekshirib ko'ring.",
+            time: "Hozir"
+          }
+        ]);
+      } finally {
+        setBusyAction(null);
+      }
+    };
+
+    return (
+      <div className="animate-fade-in pb-20" style={{ height: "calc(100vh - 80px)", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "12px 16px", background: "white", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "12px", position: "sticky", top: 0, zIndex: 10 }}>
+          <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "var(--primary)", display: "grid", placeItems: "center", color: "white" }}>
+            <MessageCircle size={20} />
+          </div>
+          <div>
+            <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 800 }}>AI izoh</h2>
+            <p style={{ margin: 0, fontSize: "0.75rem", color: "var(--secondary)", fontWeight: 600 }}>Uy vazifa xatolari</p>
+          </div>
+        </div>
+
+        {/* Message body */}
+        <div style={{ flex: 1, padding: "16px", overflowY: "auto", background: "var(--background)", display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Math feedback context header */}
+          <div className="card" style={{ padding: "12px 14px", border: "1px solid rgba(239, 68, 68, 0.2)", background: "rgba(239, 68, 68, 0.03)", borderRadius: "12px" }}>
+            <h4 style={{ margin: "0 0 6px", fontSize: "0.85rem", fontWeight: 800, color: "var(--danger)", display: "flex", alignItems: "center", gap: "4px" }}>
+              <AlertCircle size={14} /> {activeMistake.label}
+            </h4>
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+              Vazifa: <strong>{activeMistake.homeworks[0] || "Uy vazifa"}</strong> <br/>
+              Masala: <strong>{activeMistake.problems[0] || "aniqlangan xato"}</strong> <br/>
+              Izoh: {activeMistake.suggestion || "Xatoni bosqichma-bosqich qayta ko'rib chiqamiz."}
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gap: "8px" }}>
+            {tutorMistakes.slice(0, 3).map((mistake) => (
+              <div key={`${mistake.label}-${mistake.count}`} style={{ background: "white", border: "1px solid var(--border)", borderRadius: "12px", padding: "10px 12px" }}>
+                <div className="flex-between" style={{ gap: "8px" }}>
+                  <strong style={{ fontSize: "0.82rem", color: "var(--text-main)" }}>{mistake.label}</strong>
+                  <span style={{ fontSize: "0.7rem", color: "var(--danger)", fontWeight: 800 }}>{mistake.count} marta</span>
+                </div>
+                <p style={{ margin: "5px 0 0", color: "var(--text-muted)", fontSize: "0.76rem", lineHeight: 1.4 }}>
+                  {mistake.homeworks.slice(0, 2).join(", ")}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {studentTutorChat.map((msg, index) => {
+            const isUser = msg.sender === "user";
+            return (
+              <div key={index} style={{ alignSelf: isUser ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+                <div
+                  style={{
+                    background: isUser ? "var(--primary)" : "white",
+                    color: isUser ? "white" : "var(--text-main)",
+                    padding: "12px 16px",
+                    borderRadius: "16px",
+                    borderBottomLeftRadius: isUser ? "16px" : "4px",
+                    borderBottomRightRadius: isUser ? "4px" : "16px",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.02)",
+                    fontSize: "0.9rem",
+                    lineHeight: 1.4
+                  }}
+                >
+                  {msg.text}
+                </div>
+                <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "4px", marginLeft: "4px", marginRight: "4px", textAlign: isUser ? "right" : "left" }}>
+                  {msg.time || "10:30 AM"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Input box */}
+        <form onSubmit={handleSendTutor} style={{ padding: "12px 16px", background: "white", borderTop: "1px solid var(--border)", position: "sticky", bottom: "60px" }}>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input
+              type="text"
+              value={studentTutorInput}
+              onChange={(e) => setStudentTutorInput(e.target.value)}
+              placeholder="Xato bo'yicha savol yozing..."
+              disabled={busyAction === "student-tutor"}
+              style={{ flex: 1, padding: "12px 16px", borderRadius: "24px", border: "1px solid var(--border)", background: "var(--background)", fontSize: "0.9rem" }}
+            />
+            <button type="submit" disabled={busyAction === "student-tutor"} style={{ width: "45px", height: "45px", borderRadius: "50%", background: "var(--primary)", color: "white", border: "none", display: "grid", placeItems: "center", opacity: busyAction === "student-tutor" ? 0.7 : 1 }}>
+              {busyAction === "student-tutor" ? <RefreshCcw size={18} style={{ animation: "spin 1.5s linear infinite" }} /> : <Send size={18} style={{ marginLeft: "-2px" }} />}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+
+  function renderProgress() {
+    const completedHomeworks = homeworks.filter(h => h.student_status === "submitted");
+    let totalScore = 0;
+    completedHomeworks.forEach(hw => totalScore += (hw.latest_score || 0));
+    const avg = completedHomeworks.length ? Math.round((totalScore / (completedHomeworks.length * 10)) * 100) : 84;
+
+    return (
+      <div className="animate-fade-in pb-20">
+        <h2 style={{ margin: "0 0 1.2rem", fontSize: "1.3rem", fontWeight: 900, color: "var(--text-main)" }}>O'zlashtirish</h2>
+
+        {/* Summary stats */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "1.2rem" }}>
+          {[
+            { label: "O'rtacha ball", val: `${avg}%`, color: avg >= 80 ? "var(--secondary)" : avg >= 60 ? "var(--warning)" : "var(--danger)", bg: avg >= 80 ? "rgba(16,185,129,0.08)" : "rgba(245,158,11,0.08)" },
+            { label: "Bajarilgan", val: `${completedHomeworks.length} ta`, color: "var(--primary)", bg: "rgba(59,130,246,0.08)" },
+            { label: "XP darajasi", val: `${studentXP} XP`, color: "#8b5cf6", bg: "rgba(139,92,246,0.08)" },
+            { label: "Streak", val: `${studentStreak} kun 🔥`, color: "var(--danger)", bg: "rgba(239,68,68,0.08)" },
+          ].map(s => (
+            <div key={s.label} style={{ background: s.bg, borderRadius: "14px", padding: "14px", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 700, marginBottom: "6px", textTransform: "uppercase" }}>{s.label}</div>
+              <div style={{ fontSize: "1.2rem", fontWeight: 900, color: s.color }}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Progress bar */}
+        <div style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", marginBottom: "1.2rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+            <span style={{ fontWeight: 800, fontSize: "0.88rem" }}>Umumiy o'zlashtirish</span>
+            <span style={{ fontWeight: 800, fontSize: "0.88rem", color: "var(--primary)" }}>{avg}%</span>
+          </div>
+          <div style={{ width: "100%", height: "10px", background: "#f1f5f9", borderRadius: "5px", overflow: "hidden" }}>
+            <div style={{ width: `${avg}%`, height: "100%", background: "linear-gradient(90deg, var(--primary), #4f86f7)", borderRadius: "5px", transition: "width 0.8s ease" }} />
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: "0.72rem", color: "var(--text-muted)" }}>
+            O'tgan haftaga nisbatan +5% o'sish 📈
+          </p>
+        </div>
+
+        {/* Achievements */}
+        <h3 style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Yutuqlar</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "1.2rem" }}>
+          {[
+            { emoji: "🏆", label: "Ishtiyoqchi", sub: "10 ta mashq", done: true },
+            { emoji: "⚡", label: "Muntazam", sub: "7 kun ketma-ket", done: true },
+            { emoji: "🎯", label: "Perfeksionist", sub: "90%+ aniqlik", done: false },
+          ].map(a => (
+            <div key={a.label} style={{ background: a.done ? "white" : "#f8fafc", borderRadius: "14px", padding: "14px 10px", border: `1px solid ${a.done ? "var(--border)" : "#e2e8f0"}`, textAlign: "center", opacity: a.done ? 1 : 0.5 }}>
+              <div style={{ fontSize: "1.4rem", marginBottom: "6px" }}>{a.emoji}</div>
+              <div style={{ fontWeight: 800, fontSize: "0.78rem", color: "var(--text-main)", marginBottom: "2px" }}>{a.label}</div>
+              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>{a.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* AI recommendation */}
+        <div style={{ background: "rgba(59,130,246,0.04)", borderRadius: "16px", padding: "16px", border: "1px solid rgba(59,130,246,0.15)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+            <span style={{ fontSize: "1.1rem" }}>🤖</span>
+            <span style={{ fontWeight: 800, fontSize: "0.88rem", color: "var(--primary)" }}>AI tavsiyasi</span>
+          </div>
+          <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-main)", lineHeight: 1.5 }}>
+            Diskriminant hisoblashda xato ko'p uchramoqda. Belgilar bilan ishlashni mashq qiling. Qo'shimcha 5 ta mashq tavsiya qilinadi.
+          </p>
+          <button
+            onClick={() => setCurrentTab("practice")}
+            style={{ marginTop: "12px", background: "var(--primary)", color: "white", border: "none", borderRadius: "10px", padding: "8px 16px", fontWeight: 700, fontSize: "0.8rem", cursor: "pointer" }}
+          >
+            Mashqlarni boshlash →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderLegacyStudentProfilePreview() {
+    const completedHomeworks = homeworks.filter(h => h.student_status === "submitted");
+    const level = Math.floor(studentXP / 200) + 1;
+    const xpForNextLevel = level * 200;
+    const xpProgress = Math.round((studentXP / xpForNextLevel) * 100);
+
+    return (
+      <div className="animate-fade-in pb-20">
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.4rem" }}>
+          <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "var(--text-main)" }}>Profil</h2>
+          <button style={{ width: 36, height: 36, borderRadius: "10px", background: "var(--surface)", border: "1px solid var(--border)", display: "grid", placeItems: "center", cursor: "pointer" }}>
+            <Settings size={18} color="var(--text-muted)" />
+          </button>
+        </div>
+
+        {/* Avatar + name card */}
+        <div style={{ background: "white", borderRadius: "20px", padding: "20px", border: "1px solid var(--border)", marginBottom: "1.2rem", textAlign: "center" }}>
+          <div style={{ width: 72, height: 72, borderRadius: "50%", background: "linear-gradient(135deg, #2563eb, #8b5cf6)", display: "grid", placeItems: "center", margin: "0 auto 12px", overflow: "hidden", boxShadow: "0 4px 16px rgba(37,99,235,0.3)" }}>
+            {user?.photo_url
+              ? <img src={user.photo_url} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontWeight: 900, fontSize: "1.5rem", color: "white" }}>{initials(user?.full_name || "M")}</span>
+            }
+          </div>
+          <h3 style={{ margin: "0 0 3px", fontSize: "1.1rem", fontWeight: 900 }}>{user?.full_name || "Malika To'rayeva"}</h3>
+          <p style={{ margin: "0 0 14px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+            {user?.telegram_username ? `@${user.telegram_username}` : "o'quvchi@edu.uz"}
+          </p>
+
+          {/* XP progress */}
+          <div style={{ background: "#f1f5f9", borderRadius: "10px", padding: "10px 14px", textAlign: "left" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+              <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--text-main)" }}>Daraja {level}</span>
+              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{studentXP} / {xpForNextLevel} XP</span>
+            </div>
+            <div style={{ width: "100%", height: "8px", background: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
+              <div style={{ width: `${xpProgress}%`, height: "100%", background: "linear-gradient(90deg, var(--primary), #8b5cf6)", borderRadius: "4px" }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Stats grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "1.2rem" }}>
+          {[
+            { label: "Daraja", val: String(level), icon: "⭐", color: "var(--warning)" },
+            { label: "Topshiriqlar", val: `${completedHomeworks.length}`, icon: "📋", color: "var(--primary)" },
+            { label: "O'tacha natija", val: "4.3/5.0", icon: "📊", color: "var(--secondary)" },
+            { label: "Seriya", val: `${studentStreak} kun`, icon: "🔥", color: "var(--danger)" },
+            { label: "Bajarilgan", val: `${completedHomeworks.length}`, icon: "✅", color: "var(--secondary)" },
+            { label: "XP", val: `${studentXP}`, icon: "💎", color: "#8b5cf6" },
+          ].map(s => (
+            <div key={s.label} style={{ background: "white", borderRadius: "14px", padding: "12px 8px", border: "1px solid var(--border)", textAlign: "center" }}>
+              <div style={{ fontSize: "1.1rem", marginBottom: "4px" }}>{s.icon}</div>
+              <div style={{ fontWeight: 900, fontSize: "1rem", color: s.color, lineHeight: 1 }}>{s.val}</div>
+              <div style={{ fontSize: "0.62rem", color: "var(--text-muted)", marginTop: "3px" }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Achievements */}
+        <h3 style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Yutuqlar</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "1.4rem" }}>
+          {[
+            { emoji: "🏆", label: "Ishtiyoqchi", sub: "10 ta mashq", done: true },
+            { emoji: "⚡", label: "Muntazam", sub: "7 kun ketma-ket", done: true },
+            { emoji: "🎯", label: "Perfeksionist", sub: "90%+ aniqlik", done: false },
+            { emoji: "🌟", label: "Yulduz", sub: "100 XP yig'ing", done: false },
+          ].map(a => (
+            <div key={a.label} style={{ background: a.done ? "white" : "#f8fafc", borderRadius: "14px", padding: "14px", border: `1px solid ${a.done ? "var(--border)" : "#e2e8f0"}`, display: "flex", alignItems: "center", gap: "12px", opacity: a.done ? 1 : 0.55 }}>
+              <div style={{ fontSize: "1.5rem", flexShrink: 0 }}>{a.emoji}</div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "0.85rem", color: "var(--text-main)" }}>{a.label}</div>
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{a.sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Switch role */}
+        <button
+          onClick={() => void chooseRole("teacher")}
+          style={{ width: "100%", padding: "12px", background: "white", border: "1px solid var(--border)", borderRadius: "14px", fontWeight: 700, fontSize: "0.88rem", color: "var(--text-muted)", cursor: "pointer" }}
+        >
+          O'qituvchi rejimiga o'tish
+        </button>
+      </div>
+    );
+  }
+
+  void renderStudentHomework;
+  void renderProgressAnalyticsLegacy;
+  void renderLegacyStudentProfilePreview;
 }
+
+

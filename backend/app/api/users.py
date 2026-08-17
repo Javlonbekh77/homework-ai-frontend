@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Header, Depends
 from ..services.firebase_service import get_db
-from ..models.api_schemas import UpdateRoleRequest
+from ..models.api_schemas import UpdateProfileRequest, UpdateRoleRequest
 
 router = APIRouter()
 
@@ -22,3 +22,19 @@ async def update_role(req: UpdateRoleRequest, current_user: dict = Depends(get_c
     db = get_db()
     db.collection("users").document(current_user["id"]).update({"role": req.role})
     return {"status": "success", "role": req.role}
+
+@router.patch("/me/profile")
+async def update_profile(req: UpdateProfileRequest, current_user: dict = Depends(get_current_user)):
+    updates = {}
+    if req.full_name is not None:
+        full_name = req.full_name.strip()
+        if len(full_name) < 2:
+            raise HTTPException(status_code=400, detail="Ism va familiya juda qisqa")
+        updates["full_name"] = full_name
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="Yangilash uchun ma'lumot yuborilmadi")
+
+    db = get_db()
+    db.collection("users").document(current_user["id"]).update(updates)
+    return {"status": "success", **updates}

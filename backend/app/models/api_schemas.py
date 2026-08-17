@@ -14,6 +14,9 @@ class UserProfile(BaseModel):
 class UpdateRoleRequest(BaseModel):
     role: str
 
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+
 SubjectType = Literal["Matematika", "Fizika", "Ona tili"]
 
 class ClassCreateRequest(BaseModel):
@@ -44,4 +47,3 @@ class HomeworkUpdateRequest(BaseModel):
     grading_mode: Optional[str] = None
     deadline: Optional[str] = None
     allow_resubmission: Optional[bool] = None
-

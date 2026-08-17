@@ -14,5 +14,9 @@ services:
         value: gemini-3.6-flash
       - key: GEMINI_TIMEOUT_SECONDS
         value: "60"
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: GROQ_TIMEOUT_SECONDS
+        value: "45"
       - key: ENABLE_BOT_POLLING
         value: "false"
