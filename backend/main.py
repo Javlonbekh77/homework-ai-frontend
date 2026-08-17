@@ -2,10 +2,11 @@ import os
 import asyncio
 import logging
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from aiogram import Bot, Dispatcher
+from aiogram.types import Update
 from contextlib import asynccontextmanager
 
 from app.services.firebase_service import (
@@ -23,6 +24,9 @@ logging.basicConfig(level=logging.INFO)
 APP_VERSION = "teacher-results-search-dashboard"
 bot = None
 dp = Dispatcher()
+bot_mode = "disabled"
+bot_webhook_url = None
+bot_router_included = False
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -30,6 +34,28 @@ def env_flag(name: str, default: bool = False) -> bool:
     if raw_value is None:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def get_public_backend_url() -> str | None:
+    backend_url = (
+        os.getenv("TELEGRAM_WEBHOOK_BASE_URL")
+        or os.getenv("BACKEND_URL")
+        or os.getenv("PUBLIC_BACKEND_URL")
+        or os.getenv("RENDER_EXTERNAL_URL")
+    )
+    if not backend_url:
+        return None
+    backend_url = backend_url.strip().rstrip("/")
+    if backend_url and not backend_url.startswith(("http://", "https://")):
+        backend_url = f"https://{backend_url}"
+    return backend_url
+
+
+def include_bot_router_once() -> None:
+    global bot_router_included
+    if not bot_router_included:
+        dp.include_router(bot_router)
+        bot_router_included = True
 
 
 @asynccontextmanager
@@ -40,15 +66,38 @@ async def lifespan(app: FastAPI):
     except Exception:
         logging.exception("Firebase initialization failed. API endpoints will retry lazily.")
     
-    global bot
+    global bot, bot_mode, bot_webhook_url
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if token and env_flag("ENABLE_BOT_POLLING", True):
+    if token:
         try:
             bot = Bot(token=token)
-            dp.include_router(bot_router)
-            asyncio.create_task(start_bot_polling(bot))
+            include_bot_router_once()
+            if env_flag("ENABLE_BOT_POLLING", False):
+                await bot.delete_webhook(drop_pending_updates=True)
+                asyncio.create_task(start_bot_polling(bot))
+                bot_mode = "polling"
+            elif env_flag("ENABLE_BOT_WEBHOOK", True):
+                public_backend_url = get_public_backend_url()
+                if public_backend_url:
+                    bot_webhook_url = f"{public_backend_url}/api/bot/webhook"
+                    webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET")
+                    await bot.set_webhook(
+                        bot_webhook_url,
+                        secret_token=webhook_secret or None,
+                        drop_pending_updates=True,
+                    )
+                    bot_mode = "webhook"
+                    logging.info("Telegram bot webhook configured: %s", bot_webhook_url)
+                else:
+                    bot_mode = "missing_webhook_url"
+                    logging.warning("TELEGRAM_BOT_TOKEN is set, but webhook base URL is missing.")
+            else:
+                bot_mode = "disabled_by_env"
         except Exception:
             logging.exception("Telegram bot polling could not be started.")
+            bot_mode = "startup_error"
+    else:
+        bot_mode = "missing_token"
     yield
     # Shutdown
     if bot:
@@ -80,6 +129,46 @@ app.include_router(checkers.router, prefix="/api")
 app.include_router(tutor.router, prefix="/api")
 
 
+@app.post("/api/bot/webhook")
+async def telegram_bot_webhook(request: Request):
+    if not bot:
+        raise HTTPException(status_code=503, detail="Telegram bot is not initialized")
+
+    expected_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET")
+    if expected_secret and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != expected_secret:
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
+
+    payload = await request.json()
+    update = Update.model_validate(payload, context={"bot": bot})
+    await dp.feed_update(bot, update)
+    return {"ok": True}
+
+
+@app.get("/api/bot/status")
+async def telegram_bot_status():
+    webhook_info = None
+    if bot:
+        try:
+            info = await bot.get_webhook_info()
+            webhook_info = {
+                "url": info.url,
+                "pending_update_count": info.pending_update_count,
+                "last_error_date": info.last_error_date,
+                "last_error_message": info.last_error_message,
+            }
+        except Exception as exc:
+            webhook_info = {"error": str(exc)}
+
+    return {
+        "has_telegram_bot_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+        "has_telegram_web_app_url": bool(os.getenv("TELEGRAM_WEB_APP_URL")),
+        "has_webhook_base_url": bool(get_public_backend_url()),
+        "bot_mode": bot_mode,
+        "configured_webhook_url": bot_webhook_url,
+        "webhook_info": webhook_info,
+    }
+
+
 @app.get("/health")
 async def health_check():
     return {
@@ -92,9 +181,15 @@ async def health_check():
             **get_firebase_env_status(),
             "has_telegram_bot_token": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
             "has_telegram_web_app_url": bool(os.getenv("TELEGRAM_WEB_APP_URL")),
+            "has_webhook_base_url": bool(get_public_backend_url()),
             "has_gemini_api_key": bool(os.getenv("GEMINI_API_KEY")),
             "has_groq_api_key": bool(os.getenv("GROQ_API_KEY")),
+            "enable_bot_webhook": env_flag("ENABLE_BOT_WEBHOOK", True),
             "enable_bot_polling": env_flag("ENABLE_BOT_POLLING", True),
+        },
+        "bot": {
+            "mode": bot_mode,
+            "configured_webhook_url": bot_webhook_url,
         },
     }
 

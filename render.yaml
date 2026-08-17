@@ -18,5 +18,7 @@ services:
         value: openai/gpt-oss-120b
       - key: GROQ_TIMEOUT_SECONDS
         value: "45"
+      - key: ENABLE_BOT_WEBHOOK
+        value: "true"
       - key: ENABLE_BOT_POLLING
         value: "false"
