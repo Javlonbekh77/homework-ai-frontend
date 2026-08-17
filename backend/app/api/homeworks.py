@@ -817,15 +817,27 @@ async def submit_homework(
     hw_dict = hw.to_dict()
     if hw_dict.get("status") != "published":
         raise HTTPException(status_code=400, detail="Homework is not published")
+
+    class_id = hw_dict.get("class_id") or hw_dict.get("target_class_id")
+    if not class_id:
+        raise HTTPException(status_code=400, detail="Homework is not assigned to a class")
+
+    membership_docs = db.collection("class_members").where("student_id", "==", current_user["id"]).stream()
+    is_member = any(
+        member.to_dict().get("class_id") == class_id and member.to_dict().get("status", "active") == "active"
+        for member in membership_docs
+    )
+    if not is_member:
+        raise HTTPException(status_code=403, detail="Siz bu sinfga a'zo emassiz")
         
     # verify deadline if exists
     if hw_dict.get("deadline"):
         try:
             deadline = datetime.fromisoformat(hw_dict["deadline"].replace("Z", "+00:00"))
-            if datetime.utcnow().timestamp() > deadline.timestamp():
-                raise HTTPException(status_code=400, detail="Ushbu vazifaning topshirish muddati tugagan.")
-        except Exception:
-            pass # ignore parse error for now
+        except (TypeError, ValueError):
+            deadline = None
+        if deadline and datetime.utcnow().timestamp() > deadline.timestamp():
+            raise HTTPException(status_code=400, detail="Ushbu vazifaning topshirish muddati tugagan.")
             
     # check resubmission rules
     existing_subs = list(db.collection("submissions")
@@ -846,12 +858,14 @@ async def submit_homework(
     ext = os.path.splitext(image.filename)[1] or ".jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         content = await image.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="Yuklangan rasm bo'sh")
         tmp.write(content)
         tmp_path = tmp.name
 
     try:
         # evaluate
-        evaluation = await evaluate_homework(tmp_path, json.dumps(answer_key))
+        evaluation = await evaluate_homework(tmp_path, json.dumps(answer_key, ensure_ascii=False))
         eval_dict = evaluation.model_dump()
         
         # calculate max score and score correctly
@@ -864,7 +878,7 @@ async def submit_homework(
         
         submission = {
             "homework_id": homework_id,
-            "class_id": hw_dict["class_id"],
+            "class_id": class_id,
             "student_id": current_user["id"],
             "attempt_number": attempt_number,
             "score": score,

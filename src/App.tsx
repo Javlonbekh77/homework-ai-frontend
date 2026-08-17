@@ -17,7 +17,6 @@ import {
   FileText,
   Flame,
   GraduationCap,
-  Image as ImageIcon,
   Plus,
   RefreshCcw,
   School,
@@ -172,9 +171,14 @@ type ErrorDetail = {
 
 type EvaluationProblem = {
   problem_number?: string;
+  expected_answer?: string;
+  student_answer?: string;
+  student_steps?: string[];
   status?: string;
   feedback?: string;
   errors?: ErrorDetail[];
+  unreadable_parts?: string[];
+  confidence?: number;
 };
 
 type Submission = {
@@ -501,6 +505,7 @@ export default function App() {
   const [homeworkBankLoading, setHomeworkBankLoading] = useState(false);
   const [expandedAnswerKeys, setExpandedAnswerKeys] = useState<string[]>([]);
   const [publishClassByHomework, setPublishClassByHomework] = useState<Record<string, string>>({});
+  const [bankAssignClassByItem, setBankAssignClassByItem] = useState<Record<string, string>>({});
   const [answerKeyDrafts, setAnswerKeyDrafts] = useState<Record<string, AnswerKey>>({});
 
   // Question Bank States
@@ -578,8 +583,10 @@ export default function App() {
   const [studentPracticeInput, setStudentPracticeInput] = useState("-0.5");
   const [studentStreak, setStudentStreak] = useState(12);
   const [studentXP, setStudentXP] = useState(1240);
-  const [studentUploadImage, setStudentUploadImage] = useState<string | null>("https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=80&w=300");
-  const [studentProgressPercent, setStudentProgressPercent] = useState(68);
+  const [studentUploadFile, setStudentUploadFile] = useState<File | null>(null);
+  const [studentUploadImage, setStudentUploadImage] = useState<string | null>(null);
+  const [studentWorkflowSubmission, setStudentWorkflowSubmission] = useState<Submission | null>(null);
+  const [studentProgressPercent, setStudentProgressPercent] = useState(8);
   const [studentTutorInput, setStudentTutorInput] = useState("");
   const [studentTutorChat, setStudentTutorChat] = useState<Array<{ sender: "user" | "ai"; text: string; time?: string; isSpecialBlock?: boolean }>>([
     { sender: "ai", text: "Salom, Malika! Keling, bu savolda qayerda xato bo'lganini birga ko'rib chiqamiz." }
@@ -1174,19 +1181,13 @@ export default function App() {
 
   useEffect(() => {
     if (studentUploadStep !== "loading") return;
-    setStudentProgressPercent(0);
+    setStudentProgressPercent(8);
     const interval = setInterval(() => {
       setStudentProgressPercent((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setStudentUploadStep("result");
-          }, 300);
-          return 100;
-        }
-        return prev + 5;
+        if (prev >= 92) return prev;
+        return Math.min(92, prev + (prev < 55 ? 7 : 3));
       });
-    }, 150);
+    }, 260);
     return () => clearInterval(interval);
   }, [studentUploadStep]);
 
@@ -1475,15 +1476,49 @@ export default function App() {
     }
   }
 
-  function resetRoleViews() {
-    setCurrentTab("home");
+  function clearStudentUploadFile() {
+    if (studentUploadImage?.startsWith("blob:")) {
+      URL.revokeObjectURL(studentUploadImage);
+    }
+    setStudentUploadFile(null);
+    setStudentUploadImage(null);
+  }
+
+  function resetStudentNestedViews() {
     setStudentSelectedHomeworkId(null);
+    setStudentSubmissionHomeworkId("");
     setStudentUploadStep("detail");
+    setStudentWorkflowSubmission(null);
+    setSubmitFileValue(null);
+    clearStudentUploadFile();
+  }
+
+  function resetTeacherNestedViews() {
     setSelectedTeacherClassId("");
     setSelectedClassStudentId(null);
+    setSelectedJournalStudentId(null);
     setTeacherStudentSearch("");
+    setClassStudents([]);
     setClassSubTab("students");
+    setActiveHomeworkId("");
+    setTeacherSubmissionHomeworkId("");
     setToolsActiveView("home");
+  }
+
+  function navigateTo(tab: string) {
+    if (user?.role === "student") {
+      resetStudentNestedViews();
+    }
+    if (user?.role === "teacher") {
+      resetTeacherNestedViews();
+    }
+    setCurrentTab(tab);
+  }
+
+  function resetRoleViews() {
+    setCurrentTab("home");
+    resetStudentNestedViews();
+    resetTeacherNestedViews();
   }
 
   async function chooseRole(role: Role) {
@@ -1753,6 +1788,35 @@ export default function App() {
     }
   }
 
+  async function handleStudentWorkflowSubmit(homeworkId: string) {
+    if (!user || !studentUploadFile) return;
+    setBusyAction(`submit-selected-${homeworkId}`);
+    setError("");
+    setNotice("");
+    setStudentUploadStep("loading");
+    setStudentProgressPercent(8);
+    try {
+      const submitted = (await submitHomework(user.id, homeworkId, studentUploadFile)) as Submission;
+      setStudentWorkflowSubmission(submitted);
+      setStudentSubmissionsByHomework((prev) => ({
+        ...prev,
+        [homeworkId]: [submitted, ...(prev[homeworkId] || [])],
+      }));
+      const list = (await getMySubmissions(user.id, homeworkId)) as Submission[];
+      setStudentSubmissionsByHomework((prev) => ({ ...prev, [homeworkId]: sortSubmissions(list) }));
+      clearStudentUploadFile();
+      setStudentProgressPercent(100);
+      setStudentUploadStep("result");
+      setNotice("Vazifa yuborildi va AI tomonidan tekshirildi.");
+      await loadDashboard(user);
+    } catch (caught) {
+      setStudentUploadStep("upload");
+      setError(getErrorMessage(caught));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function handleLoadMySubmissions(homeworkId: string) {
     if (!user) return;
     setBusyAction(`my-submissions-${homeworkId}`);
@@ -1932,6 +1996,15 @@ export default function App() {
     setSubmitFileValue(event.target.files?.[0] ?? null);
   }
 
+  function handleStudentUploadFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    if (studentUploadImage?.startsWith("blob:")) {
+      URL.revokeObjectURL(studentUploadImage);
+    }
+    setStudentUploadFile(file);
+    setStudentUploadImage(file ? URL.createObjectURL(file) : null);
+  }
+
   async function copyJoinCode(code?: string) {
     if (!code) return;
     await navigator.clipboard?.writeText(code);
@@ -2045,9 +2118,9 @@ export default function App() {
         {error ? <div className="alert error">{error}</div> : null}
         {notice ? <div className="alert success">{notice}</div> : null}
 
-        {user.role === "teacher" && ["home", "classes", "homeworks", "tools", "add_wizard"].includes(currentTab) && renderTeacher()}
+        {user.role === "teacher" && ["home", "classes", "homeworks", "homework_bank", "tools", "add_wizard"].includes(currentTab) && renderTeacher()}
         {user.role === "teacher" && currentTab === "journal" && renderJournal()}
-        {user.role === "student" && studentSelectedHomeworkId && ["home", "homeworks", "practice", "tutor", "progress"].includes(currentTab) && renderStudent()}
+        {user.role === "student" && studentSelectedHomeworkId && ["home", "homeworks"].includes(currentTab) && renderStudent()}
         {user.role === "student" && !studentSelectedHomeworkId && ["home", "homeworks"].includes(currentTab) && renderStudent()}
         {user.role === "student" && !studentSelectedHomeworkId && currentTab === "practice" && renderPractice()}
         {user.role === "student" && !studentSelectedHomeworkId && currentTab === "tutor" && renderTutor()}
@@ -2058,49 +2131,46 @@ export default function App() {
       <nav className="bottom-nav">
         {user.role === "teacher" ? (
           <>
-            <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => setCurrentTab("home")}>
+            <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => navigateTo("home")}>
               <Home size={24} />
               <span>Bosh sahifa</span>
             </button>
-            <button className={`nav-item ${currentTab === "classes" ? "active" : ""}`} onClick={() => setCurrentTab("classes")}>
+            <button className={`nav-item ${currentTab === "classes" ? "active" : ""}`} onClick={() => navigateTo("classes")}>
               <UsersRound size={24} />
               <span>Sinflar</span>
             </button>
-            
-            <div className="nav-fab-container">
-               <button className="nav-fab" onClick={() => setCurrentTab("add_wizard")}>
-                  <Plus size={30} />
-               </button>
-            </div>
-
-            <button className={`nav-item ${currentTab === "tools" ? "active" : ""}`} onClick={() => setCurrentTab("tools")}>
+            <button className={`nav-item ${currentTab === "homework_bank" ? "active" : ""}`} onClick={() => navigateTo("homework_bank")}>
+              <ClipboardList size={24} />
+              <span>Bank</span>
+            </button>
+            <button className={`nav-item ${currentTab === "tools" ? "active" : ""}`} onClick={() => navigateTo("tools")}>
               <Wrench size={24} />
               <span>Vositalar</span>
             </button>
-            <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => setCurrentTab("profile")}>
+            <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => navigateTo("profile")}>
               <UserRound size={24} />
               <span>Profil</span>
             </button>
           </>
         ) : (
           <>
-            <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => setCurrentTab("home")}>
+            <button className={`nav-item ${currentTab === "home" ? "active" : ""}`} onClick={() => navigateTo("home")}>
               <Home size={24} />
               <span>Bosh sahifa</span>
             </button>
-            <button className={`nav-item ${currentTab === "homeworks" ? "active" : ""}`} onClick={() => setCurrentTab("homeworks")}>
+            <button className={`nav-item ${currentTab === "homeworks" ? "active" : ""}`} onClick={() => navigateTo("homeworks")}>
               <BookOpen size={24} />
               <span>Vazifalar</span>
             </button>
-            <button className={`nav-item ${currentTab === "practice" ? "active" : ""}`} onClick={() => setCurrentTab("practice")}>
+            <button className={`nav-item ${currentTab === "practice" ? "active" : ""}`} onClick={() => navigateTo("practice")}>
               <PenTool size={24} />
               <span>Takrorlash</span>
             </button>
-            <button className={`nav-item ${currentTab === "tutor" ? "active" : ""}`} onClick={() => setCurrentTab("tutor")}>
+            <button className={`nav-item ${currentTab === "tutor" ? "active" : ""}`} onClick={() => navigateTo("tutor")}>
               <MessageCircle size={24} />
               <span>AI izoh</span>
             </button>
-            <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => setCurrentTab("profile")}>
+            <button className={`nav-item ${currentTab === "profile" ? "active" : ""}`} onClick={() => navigateTo("profile")}>
               <UserRound size={24} />
               <span>Profil</span>
             </button>
@@ -2116,6 +2186,9 @@ export default function App() {
     }
     if (currentTab === "tools") {
       return renderTeacherTools();
+    }
+    if (currentTab === "homework_bank") {
+      return renderHomeworkBankPage();
     }
     if (currentTab === "classes") {
       if (selectedTeacherClassId) {
@@ -2318,8 +2391,10 @@ export default function App() {
                     />
                   </label>
                   <button className="btn btn-secondary" type="submit" disabled={isBusy || !homeworkForm.title.trim()}>
-                    <Plus size={18} /> Qoralama ochish
+                    {busyAction === "create-homework" ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Plus size={18} />}
+                    {busyAction === "create-homework" ? "Qoralama ochilmoqda..." : "Qoralama ochish"}
                   </button>
+                  {busyAction === "create-homework" ? renderSoftLoading("Qoralama yaratilmoqda", "Vazifa shu sinfga ulanib, bankka saqlanmoqda.") : null}
                 </form>
 
                 {renderHomeworkBankPicker(selectedTeacherClassId)}
@@ -2474,8 +2549,10 @@ export default function App() {
                   />
                 </label>
                 <button className="btn btn-secondary" type="submit" disabled={isBusy || !homeworkForm.title.trim()}>
-                  <Plus size={18} /> Qoralama ochish
+                  {busyAction === "create-homework" ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Plus size={18} />}
+                  {busyAction === "create-homework" ? "Qoralama ochilmoqda..." : "Qoralama ochish"}
                 </button>
+                {busyAction === "create-homework" ? renderSoftLoading("Qoralama yaratilmoqda", "Vazifa tanlangan sinfga ulanib, bankka saqlanmoqda.") : null}
               </form>
 
               {renderHomeworkBankPicker(selectedClass.id)}
@@ -2579,7 +2656,7 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div className="card card-interactive" style={{ padding: "1rem", margin: 0, display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onClick={() => { setSelectedTeacherClassId(classes[0]?.id || ""); setCurrentTab("classes"); }}>
+          <div className="card card-interactive" style={{ padding: "1rem", margin: 0, display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onClick={() => { navigateTo("classes"); setSelectedTeacherClassId(classes[0]?.id || ""); }}>
             <div className="flex-start" style={{ gap: "12px" }}>
               <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(239, 68, 68, 0.1)", color: "var(--danger)", display: "grid", placeItems: "center" }}>
                 <AlertCircle size={20} />
@@ -2592,7 +2669,7 @@ export default function App() {
             <ChevronRight size={20} color="var(--text-muted)" />
           </div>
 
-          <div className="card card-interactive" style={{ padding: "1rem", margin: 0, display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onClick={() => { setSelectedTeacherClassId(classes[1]?.id || ""); setCurrentTab("classes"); }}>
+          <div className="card card-interactive" style={{ padding: "1rem", margin: 0, display: "flex", flexDirection: "row", justifyContent: "space-between", alignItems: "center" }} onClick={() => { navigateTo("classes"); setSelectedTeacherClassId(classes[1]?.id || ""); }}>
             <div className="flex-start" style={{ gap: "12px" }}>
               <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "rgba(59, 130, 246, 0.1)", color: "var(--primary)", display: "grid", placeItems: "center" }}>
                 <Bell size={20} />
@@ -2866,6 +2943,137 @@ export default function App() {
     );
   }
 
+  function renderHomeworkBankPage() {
+    const readyCount = homeworkBank.filter((item) => item.answer_key_approved).length;
+    const assignmentCount = homeworkBank.reduce((sum, item) => sum + (item.assignment_count || 0), 0);
+    const classNameById = new Map(classes.map((item) => [item.id, item.name]));
+
+    return (
+      <div className="animate-fade-in pb-20">
+        <div className="flex-between" style={{ marginBottom: "1.2rem", alignItems: "flex-start" }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: "1.45rem", fontWeight: 900, color: "var(--text-main)" }}>Vazifalar banki</h2>
+            <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.45 }}>
+              Bir marta tayyorlangan vazifani boshqa sinflarga qayta biriktiring.
+            </p>
+          </div>
+          <button
+            className="icon-btn"
+            type="button"
+            disabled={!user || homeworkBankLoading}
+            onClick={() => user && void loadHomeworkBank(user.id)}
+            title="Bankni yangilash"
+          >
+            <RefreshCcw size={17} style={homeworkBankLoading ? { animation: "spin 1.2s linear infinite" } : undefined} />
+          </button>
+        </div>
+
+        <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "14px" }}>
+          <div className="card" style={{ padding: "12px", margin: 0, textAlign: "center" }}>
+            <div style={{ fontSize: "1.25rem", fontWeight: 900, color: "var(--primary)" }}>{homeworkBank.length}</div>
+            <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 800 }}>Vazifa</span>
+          </div>
+          <div className="card" style={{ padding: "12px", margin: 0, textAlign: "center" }}>
+            <div style={{ fontSize: "1.25rem", fontWeight: 900, color: "var(--secondary)" }}>{readyCount}</div>
+            <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 800 }}>Tayyor</span>
+          </div>
+          <div className="card" style={{ padding: "12px", margin: 0, textAlign: "center" }}>
+            <div style={{ fontSize: "1.25rem", fontWeight: 900, color: "var(--warning)" }}>{assignmentCount}</div>
+            <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 800 }}>Biriktirish</span>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: "14px", marginBottom: "14px", border: "1px solid rgba(59,130,246,0.16)", background: "rgba(59,130,246,0.03)" }}>
+          <div className="flex-between" style={{ gap: "12px" }}>
+            <div className="flex-start" style={{ gap: "10px" }}>
+              <div style={{ width: 38, height: 38, borderRadius: "10px", background: "rgba(59,130,246,0.1)", color: "var(--primary)", display: "grid", placeItems: "center", flexShrink: 0 }}>
+                <Plus size={19} />
+              </div>
+              <div>
+                <strong style={{ display: "block", fontSize: "0.9rem" }}>Yangi vazifa qo'shish</strong>
+                <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.35 }}>Avval sinfga kiring, qoralama oching va rasmni AI bilan tahlil qiling.</span>
+              </div>
+            </div>
+            <button className="btn btn-primary" type="button" onClick={() => navigateTo("classes")} style={{ width: "auto", padding: "0.55rem 0.8rem", fontSize: "0.78rem" }}>
+              Sinflar
+            </button>
+          </div>
+        </div>
+
+        {homeworkBankLoading ? (
+          renderSoftLoading("Vazifalar banki yuklanmoqda", "Saqlangan qoralamalar va biriktirilgan sinflar tekshirilmoqda.")
+        ) : homeworkBank.length === 0 ? (
+          <div className="empty-state">Bankda hali vazifa yo'q.</div>
+        ) : (
+          <section className="stack">
+            {homeworkBank.map((item) => {
+              const assignedClassIds = item.assigned_class_ids || [];
+              const availableClasses = classes.filter((cls) => !assignedClassIds.includes(cls.id));
+              const selectedClassForItem = bankAssignClassByItem[item.id] || availableClasses[0]?.id || "";
+              const isAssigning = busyAction === `assign-bank-${item.id}`;
+              const status = item.workflow_status || item.status;
+
+              return (
+                <article className="card homework-card" key={item.id}>
+                  <div className="card-head">
+                    <div>
+                      <h3>{item.title}</h3>
+                      <p>{item.subject || "Fan"} - {item.assignment_count || 0} ta sinfga biriktirilgan</p>
+                    </div>
+                    <span className={`badge ${statusBadge(status)}`}>{statusLabel(status)}</span>
+                  </div>
+
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
+                    {assignedClassIds.length ? assignedClassIds.map((classId) => (
+                      <span key={classId} className="badge badge-blue" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>
+                        {classNameById.get(classId) || "Sinf"}
+                      </span>
+                    )) : (
+                      <span className="badge badge-orange" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>Hali sinfga biriktirilmagan</span>
+                    )}
+                    {item.answer_key_approved ? (
+                      <span className="badge badge-green" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>Javob kaliti tayyor</span>
+                    ) : (
+                      <span className="badge badge-orange" style={{ fontSize: "0.68rem", padding: "3px 8px" }}>Tasdiq kutilmoqda</span>
+                    )}
+                  </div>
+
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    <label className="input-group" style={{ margin: 0 }}>
+                      <span className="input-label">Boshqa sinfga biriktirish</span>
+                      <select
+                        className="input-field"
+                        value={selectedClassForItem}
+                        onChange={(event) => setBankAssignClassByItem((prev) => ({ ...prev, [item.id]: event.target.value }))}
+                        disabled={isBusy || availableClasses.length === 0}
+                      >
+                        {availableClasses.length === 0 ? (
+                          <option value="">Hamma sinflarga biriktirilgan</option>
+                        ) : availableClasses.map((cls) => (
+                          <option key={cls.id} value={cls.id}>{cls.name} - {cls.subject}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={isBusy || !selectedClassForItem}
+                      onClick={() => void handleAssignHomeworkBankItem(item.id, selectedClassForItem)}
+                    >
+                      {isAssigning ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <Plus size={17} />}
+                      {isAssigning ? "Biriktirilmoqda..." : "Sinfga biriktirish"}
+                    </button>
+                    {isAssigning ? renderSoftLoading("Vazifa biriktirilmoqda", "Bankdagi vazifa tanlangan sinfga qoralama sifatida ulanmoqda.") : null}
+                  </div>
+                </article>
+              );
+            })}
+          </section>
+        )}
+      </div>
+    );
+  }
+
   function renderHomeworkBankPicker(activeClassId: string) {
     if (!activeClassId) return null;
 
@@ -2893,13 +3101,14 @@ export default function App() {
         </p>
 
         {homeworkBankLoading ? (
-          <div className="empty-state compact">Bank yuklanmoqda...</div>
+          renderSoftLoading("Bank yuklanmoqda", "Saqlangan vazifalar va sinf biriktirishlari olinmoqda.")
         ) : bankItems.length === 0 ? (
           <div className="empty-state compact">Bankda hali vazifa yo'q. Avval qoralama oching.</div>
         ) : (
           <div style={{ display: "grid", gap: "8px" }}>
             {bankItems.map((item) => {
               const assigned = assignedBankIds.has(item.id) || (item.assigned_class_ids || []).includes(activeClassId);
+              const isAssigning = busyAction === `assign-bank-${item.id}`;
               const status = item.workflow_status || item.status;
               return (
                 <div
@@ -2931,10 +3140,11 @@ export default function App() {
                       onClick={() => void handleAssignHomeworkBankItem(item.id, activeClassId)}
                       style={{ width: "auto", minWidth: "118px", padding: "0.55rem 0.7rem", fontSize: "0.78rem" }}
                     >
-                      {assigned ? <Check size={16} /> : <Plus size={16} />}
-                      {assigned ? "Biriktirilgan" : "Biriktirish"}
+                      {isAssigning ? <RefreshCcw size={16} style={{ animation: "spin 1.2s linear infinite" }} /> : assigned ? <Check size={16} /> : <Plus size={16} />}
+                      {isAssigning ? "Kutilmoqda..." : assigned ? "Biriktirilgan" : "Biriktirish"}
                     </button>
                   </div>
+                  {isAssigning ? renderSoftLoading("Vazifa biriktirilmoqda", "Bankdagi vazifa shu sinfga qoralama sifatida ulanmoqda.") : null}
                 </div>
               );
             })}
@@ -2949,6 +3159,9 @@ export default function App() {
     const problems = answerKey?.problems ?? [];
     const isActive = activeHomeworkId === homework.id;
     const showingSubmissions = teacherSubmissionHomeworkId === homework.id;
+    const isAnalyzing = busyAction === `analyze-${homework.id}`;
+    const isApproving = busyAction === `approve-${homework.id}`;
+    const isPublishing = busyAction === `publish-${homework.id}`;
     const selectedPublishClassId = publishClassByHomework[homework.id] || homework.class_id || homework.target_class_id || selectedClassId || selectedTeacherClassId || classes[0]?.id || "";
     const updateDraftProblem = (problemIndex: number, field: keyof AnswerProblem, value: string) => {
       const baseKey = answerKey || { image_quality: "medium", general_notes: "", problems: [] };
@@ -3011,9 +3224,10 @@ export default function App() {
               type="submit"
               disabled={isBusy || !sourceFile || !problemRange.trim()}
             >
-              <Camera size={18} />
-              AI bilan yechish
+              {isAnalyzing ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Camera size={18} />}
+              {isAnalyzing ? "AI tahlil qilmoqda..." : "AI bilan yechish"}
             </button>
+            {isAnalyzing ? renderSoftLoading("AI darslik rasmini tahlil qilmoqda", "Masalalar ajratilmoqda, yechim va javob kaliti tayyorlanmoqda.") : null}
           </form>
         ) : null}
 
@@ -3145,8 +3359,8 @@ export default function App() {
                     disabled={isBusy || homework.answer_key_approved || !answerKey}
                     onClick={() => void handleApprove(homework)}
                   >
-                    <Check size={17} />
-                    Tasdiqlash
+                    {isApproving ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <Check size={17} />}
+                    {isApproving ? "Tasdiqlanmoqda..." : "Tasdiqlash"}
                   </button>
                   <button
                     className="btn btn-primary"
@@ -3154,10 +3368,12 @@ export default function App() {
                     disabled={isBusy || !homework.answer_key_approved || homework.status === "published" || !selectedPublishClassId}
                     onClick={() => void handlePublish(homework.id)}
                   >
-                    <Send size={17} />
-                    Publish
+                    {isPublishing ? <RefreshCcw size={17} style={{ animation: "spin 1.2s linear infinite" }} /> : <Send size={17} />}
+                    {isPublishing ? "Yuborilmoqda..." : "Publish"}
                   </button>
                 </div>
+                {isApproving ? renderSoftLoading("Javob kaliti tasdiqlanmoqda", "Tahrirlangan javoblar bank va sinf vazifasiga saqlanmoqda.") : null}
+                {isPublishing ? renderSoftLoading("Vazifa o'quvchilarga yuborilmoqda", "Publish holati va sinf biriktirish ma'lumotlari yangilanmoqda.") : null}
               </div>
             ) : null}
           </section>
@@ -3325,7 +3541,11 @@ export default function App() {
               <button
                 className="btn btn-primary"
                 style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.8rem" }}
-                onClick={() => setStudentUploadStep("upload")}
+                onClick={() => {
+                  setStudentWorkflowSubmission(null);
+                  clearStudentUploadFile();
+                  setStudentUploadStep("upload");
+                }}
               >
                 Topshirishni boshlash
               </button>
@@ -3350,27 +3570,29 @@ export default function App() {
               <h2 style={{ fontSize: "1.3rem", fontWeight: 800, margin: "0 0 4px", color: "var(--text-main)" }}>Yechimni yuklash</h2>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)", margin: "0 0 1.2rem" }}>Daftaringizdagi yechimlar rasmini aniq qilib yuklang</p>
 
-              {/* Upload buttons */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "1.2rem" }}>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  style={{ flexDirection: "column", height: "80px", gap: "6px", borderRadius: "14px", border: "1px solid var(--border)", background: "white" }}
-                  onClick={() => setStudentUploadImage("https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=80&w=400")}
-                >
-                  <Camera size={24} color="var(--primary)" />
-                  <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>Kamera</span>
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  style={{ flexDirection: "column", height: "80px", gap: "6px", borderRadius: "14px", border: "1px solid var(--border)", background: "white" }}
-                  onClick={() => setStudentUploadImage("https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&q=80&w=400")}
-                >
-                  <ImageIcon size={24} color="var(--secondary)" />
-                  <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>Galereya</span>
-                </button>
-              </div>
+              <label
+                className="file-picker"
+                style={{
+                  minHeight: "116px",
+                  border: "2px dashed var(--primary)",
+                  background: "rgba(59,130,246,0.04)",
+                  borderRadius: "16px",
+                  marginBottom: "1.2rem",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  textAlign: "center",
+                  gap: "8px",
+                }}
+              >
+                <Upload size={26} />
+                <strong style={{ fontSize: "0.95rem", color: "var(--text-main)" }}>
+                  {studentUploadFile?.name || "Rasm yuklash"}
+                </strong>
+                <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+                  Telefon kamera yoki galereya tanlovini o'zi chiqaradi.
+                </span>
+                <input accept="image/*" type="file" disabled={busyAction?.startsWith("submit-selected-")} onChange={handleStudentUploadFile} />
+              </label>
 
               {/* Advice Checklist */}
               <div style={{ background: "var(--background)", padding: "12px 14px", borderRadius: "12px", marginBottom: "1.2rem" }}>
@@ -3397,8 +3619,8 @@ export default function App() {
                     style={{ width: "100%", height: "180px", objectFit: "cover", borderRadius: "8px" }}
                   />
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", padding: "2px 6px" }}>
-                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>yechim_rasmi.jpg</span>
-                    <button className="text-btn" style={{ color: "var(--danger)", padding: 0, border: "none", fontSize: "0.8rem", fontWeight: 700 }} onClick={() => setStudentUploadImage(null)}>
+                    <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>{studentUploadFile?.name || "yechim_rasmi.jpg"}</span>
+                    <button className="text-btn" type="button" style={{ color: "var(--danger)", padding: 0, border: "none", fontSize: "0.8rem", fontWeight: 700 }} onClick={clearStudentUploadFile}>
                       Rasmni o'chirish
                     </button>
                   </div>
@@ -3408,11 +3630,13 @@ export default function App() {
               <button
                 className="btn btn-primary"
                 style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.8rem" }}
-                disabled={!studentUploadImage}
-                onClick={() => setStudentUploadStep("loading")}
+                disabled={!studentUploadFile || busyAction?.startsWith("submit-selected-")}
+                onClick={() => void handleStudentWorkflowSubmit(activeHomework.id)}
               >
-                AI bilan tekshirish
+                {busyAction === `submit-selected-${activeHomework.id}` ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Send size={18} />}
+                {busyAction === `submit-selected-${activeHomework.id}` ? "Yuborilmoqda..." : "AI bilan tekshirish"}
               </button>
+              {busyAction === `submit-selected-${activeHomework.id}` ? renderSoftLoading("Rasm yuborilmoqda", "AI tekshiruv boshlanishi uchun rasm backendga jo'natilmoqda.") : null}
             </div>
           </div>
         );
@@ -3502,6 +3726,18 @@ export default function App() {
 
       // Screen 6: Homework Result
       if (studentUploadStep === "result") {
+        const latestStoredSubmission = (studentSubmissionsByHomework[activeHomework.id] || [])[0];
+        const resultSubmission = studentWorkflowSubmission || activeHomework.latest_submission || latestStoredSubmission;
+        const grading = resultSubmission?.grading_result;
+        const resultProblems = grading?.problems || [];
+        const maxScore = resultSubmission?.max_score ?? activeHomework.max_score ?? 10;
+        const score = resultSubmission?.score ?? activeHomework.latest_score ?? 0;
+        const percentage = resultSubmission?.percentage ?? activeHomework.latest_percentage ?? 0;
+        const gradeLabel = percentage >= 90 ? "A'lo" : percentage >= 75 ? "Yaxshi" : percentage >= 60 ? "Qoniqarli" : "Takrorlash kerak";
+        const gradeBadge = percentage >= 75 ? "badge-green" : percentage >= 60 ? "badge-orange" : "badge-red";
+        const stars = Math.max(1, Math.min(5, Math.round((percentage || 0) / 20)));
+        const issueRows = resultProblems.filter((problem) => problem.status && problem.status !== "correct").slice(0, 3);
+
         return (
           <div className="animate-fade-in pb-20">
             {/* Header Celebration */}
@@ -3516,19 +3752,17 @@ export default function App() {
               <div>
                 <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>BAHO</span>
                 <div style={{ fontSize: "2rem", fontWeight: 900, color: "var(--text-main)", display: "flex", alignItems: "baseline", gap: "4px" }}>
-                  4.2 <span style={{ fontSize: "1rem", color: "var(--text-muted)", fontWeight: 500 }}>/ 5.0</span>
+                  {score} <span style={{ fontSize: "1rem", color: "var(--text-muted)", fontWeight: 500 }}>/ {maxScore}</span>
                 </div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <span className="badge badge-green" style={{ fontSize: "0.8rem", padding: "4px 12px", borderRadius: "20px", fontWeight: 800, marginBottom: "8px", display: "inline-block" }}>
-                  Yaxshi
+                <span className={`badge ${gradeBadge}`} style={{ fontSize: "0.8rem", padding: "4px 12px", borderRadius: "20px", fontWeight: 800, marginBottom: "8px", display: "inline-block" }}>
+                  {gradeLabel}
                 </span>
                 <div style={{ display: "flex", gap: "2px", color: "var(--warning)" }}>
-                  <Star size={16} fill="var(--warning)" />
-                  <Star size={16} fill="var(--warning)" />
-                  <Star size={16} fill="var(--warning)" />
-                  <Star size={16} fill="var(--warning)" />
-                  <Star size={16} />
+                  {[1, 2, 3, 4, 5].map((item) => (
+                    <Star key={item} size={16} fill={item <= stars ? "var(--warning)" : "none"} />
+                  ))}
                 </div>
               </div>
             </div>
@@ -3537,15 +3771,15 @@ export default function App() {
             <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginBottom: "16px" }}>
               <div className="stat-card" style={{ border: "1px solid rgba(16, 185, 129, 0.2)", background: "rgba(16, 185, 129, 0.02)", padding: "10px", borderRadius: "12px", textAlign: "center" }}>
                 <span className="badge badge-green" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>To'g'ri</span>
-                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--green)" }}>21 ta</div>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--green)" }}>{grading?.correct_count ?? 0} ta</div>
               </div>
               <div className="stat-card" style={{ border: "1px solid rgba(239, 68, 68, 0.2)", background: "rgba(239, 68, 68, 0.02)", padding: "10px", borderRadius: "12px", textAlign: "center" }}>
                 <span className="badge badge-red" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>Xato</span>
-                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--danger)" }}>4 ta</div>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--danger)" }}>{grading?.incorrect_count ?? 0} ta</div>
               </div>
               <div className="stat-card" style={{ border: "1px solid rgba(245, 158, 11, 0.2)", background: "rgba(245, 158, 11, 0.02)", padding: "10px", borderRadius: "12px", textAlign: "center" }}>
-                <span className="badge badge-orange" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>Qisman</span>
-                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--warning)" }}>2 ta</div>
+                <span className="badge badge-orange" style={{ fontSize: "0.65rem", padding: "2px 6px", display: "inline-block", marginBottom: "4px" }}>Aniq emas</span>
+                <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "var(--warning)" }}>{(grading?.missing_count ?? 0) + (grading?.uncertain_count ?? 0)} ta</div>
               </div>
             </div>
 
@@ -3553,14 +3787,16 @@ export default function App() {
             <div className="card" style={{ padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "16px" }}>
               <h4 style={{ margin: "0 0 10px", fontSize: "0.9rem", fontWeight: 800, color: "var(--text-main)" }}>Qaysi mavzuda xatolaringiz bor?</h4>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                <div className="flex-between" style={{ padding: "8px 12px", background: "var(--background)", borderRadius: "8px" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Diskriminant hisoblash</span>
-                  <span className="badge badge-red" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>1 ta xato</span>
-                </div>
-                <div className="flex-between" style={{ padding: "8px 12px", background: "var(--background)", borderRadius: "8px" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Ishoralar bilan ishlash</span>
-                  <span className="badge badge-red" style={{ fontSize: "0.7rem", padding: "2px 6px" }}>3 ta xato</span>
-                </div>
+                {issueRows.length ? issueRows.map((problem) => (
+                  <div className="flex-between" key={`${problem.problem_number}-${problem.status}`} style={{ padding: "8px 12px", background: "var(--background)", borderRadius: "8px", gap: "10px" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>{problem.errors?.[0]?.description || problem.feedback || `Masala ${problem.problem_number}`}</span>
+                    <span className={problem.status === "missing" || problem.status === "uncertain" ? "badge badge-orange" : "badge badge-red"} style={{ fontSize: "0.7rem", padding: "2px 6px" }}>
+                      {problem.status === "missing" ? "Tushib qolgan" : problem.status === "uncertain" ? "Aniq emas" : "Xato"}
+                    </span>
+                  </div>
+                )) : (
+                  <div className="empty-state compact">Aniq xato topilmadi. Shu ritmni ushlab turing!</div>
+                )}
               </div>
             </div>
 
@@ -3568,26 +3804,49 @@ export default function App() {
             <div className="card" style={{ padding: "16px", borderRadius: "16px", border: "1px solid var(--border)", marginBottom: "20px" }}>
               <h4 style={{ margin: "0 0 12px", fontSize: "0.95rem", fontWeight: 800, color: "var(--text-main)" }}>Batafsil ko'rib chiqish:</h4>
               <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                <div style={{ padding: "10px", background: "var(--background)", borderRadius: "10px", borderLeft: "4px solid var(--green)" }}>
-                  <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--green)" }}>
-                    <CheckCircle size={14} /> Masala #1: To'g'ri (1.0/1.0)
-                  </div>
-                </div>
-                <div style={{ padding: "10px", background: "var(--background)", borderRadius: "10px", borderLeft: "4px solid var(--green)" }}>
-                  <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--green)" }}>
-                    <CheckCircle size={14} /> Masala #2: To'g'ri (1.0/1.0)
-                  </div>
-                </div>
-                <div style={{ padding: "10px", background: "rgba(239, 68, 68, 0.02)", borderRadius: "10px", border: "1px solid rgba(239, 68, 68, 0.15)", borderLeft: "4px solid var(--danger)" }}>
-                  <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: "var(--danger)", marginBottom: "4px" }}>
-                    <AlertCircle size={14} /> Masala #3: Xato (0.2/1.0)
-                  </div>
-                  <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
-                    Diskriminant D = bÂ² - 4ac hisoblashda ishorani noto'g'ri qo'lladingiz. D = 25 - (-24) = 49 bo'lishi kerak edi.
-                  </p>
-                </div>
+                {resultProblems.length ? resultProblems.map((problem) => {
+                  const ok = problem.status === "correct";
+                  const uncertain = problem.status === "missing" || problem.status === "uncertain";
+                  const rowColor = ok ? "var(--green)" : uncertain ? "var(--warning)" : "var(--danger)";
+                  return (
+                    <div
+                      key={`${problem.problem_number}-${problem.status}`}
+                      style={{
+                        padding: "10px",
+                        background: ok ? "var(--background)" : uncertain ? "rgba(245, 158, 11, 0.04)" : "rgba(239, 68, 68, 0.02)",
+                        borderRadius: "10px",
+                        border: ok ? "none" : `1px solid ${uncertain ? "rgba(245,158,11,0.18)" : "rgba(239,68,68,0.15)"}`,
+                        borderLeft: `4px solid ${rowColor}`,
+                      }}
+                    >
+                      <div className="flex-start" style={{ gap: "6px", fontWeight: 700, fontSize: "0.85rem", color: rowColor, marginBottom: problem.feedback ? "4px" : 0 }}>
+                        {ok ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+                        Masala #{problem.problem_number || "-"}: {ok ? "To'g'ri" : problem.status === "missing" ? "Tushib qolgan" : problem.status === "uncertain" ? "Aniq emas" : "Xato"}
+                      </div>
+                      {problem.feedback ? (
+                        <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", lineHeight: 1.4 }}>
+                          {problem.feedback}
+                        </p>
+                      ) : null}
+                      {problem.errors?.[0]?.suggestion ? (
+                        <p style={{ margin: "4px 0 0", fontSize: "0.78rem", color: "var(--text-main)", lineHeight: 1.4 }}>
+                          Tavsiya: {problem.errors[0].suggestion}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                }) : (
+                  <div className="empty-state compact">AI batafsil problemalar ro'yxatini qaytarmadi.</div>
+                )}
               </div>
             </div>
+
+            {grading?.general_feedback ? (
+              <div className="card" style={{ padding: "16px", borderRadius: "16px", border: "1px solid rgba(59,130,246,0.16)", background: "rgba(59,130,246,0.03)", marginBottom: "16px" }}>
+                <h4 style={{ margin: "0 0 8px", fontSize: "0.9rem", fontWeight: 800, color: "var(--primary)" }}>AI feedback</h4>
+                <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--text-main)", lineHeight: 1.5 }}>{grading.general_feedback}</p>
+              </div>
+            ) : null}
 
             {/* Action buttons */}
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -3595,9 +3854,8 @@ export default function App() {
                 className="btn btn-secondary"
                 style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.75rem" }}
                 onClick={() => {
-                  setCurrentTab("practice");
                   setStudentPracticeStep("question");
-                  setStudentSelectedHomeworkId(null);
+                  navigateTo("practice");
                 }}
               >
                 Takrorlashga o'tish
@@ -3606,8 +3864,7 @@ export default function App() {
                 className="btn btn-primary"
                 style={{ width: "100%", justifyContent: "center", fontWeight: 800, padding: "0.75rem" }}
                 onClick={() => {
-                  setCurrentTab("tutor");
-                  setStudentSelectedHomeworkId(null);
+                  navigateTo("tutor");
                 }}
               >
                 AI izoh bilan tushuntirish
@@ -3700,7 +3957,12 @@ export default function App() {
                   ) : null}
                   <div
                     style={{ background: "white", borderRadius: "16px", padding: "14px", border: "1px solid var(--border)", cursor: "pointer", display: "flex", gap: "12px", alignItems: "flex-start" }}
-                    onClick={() => { setStudentSelectedHomeworkId(hw.id); setStudentUploadStep(showCompleted ? "result" : "detail"); }}
+                    onClick={() => {
+                      setStudentWorkflowSubmission(null);
+                      clearStudentUploadFile();
+                      setStudentSelectedHomeworkId(hw.id);
+                      setStudentUploadStep(showCompleted ? "result" : "detail");
+                    }}
                   >
                   <div style={{ width: 42, height: 42, borderRadius: "12px", background: m.bg, display: "grid", placeItems: "center", fontSize: "1.15rem", flexShrink: 0 }}>{m.emoji}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -3758,7 +4020,7 @@ export default function App() {
             <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 500 }}>Bugun ajoyib kun bo'lsin!</p>
           </div>
           <button
-            onClick={() => setCurrentTab("profile")}
+            onClick={() => navigateTo("profile")}
             style={{ width: 42, height: 42, borderRadius: "50%", border: "2.5px solid var(--border)", padding: 0, cursor: "pointer", overflow: "hidden", background: "var(--surface)", display: "grid", placeItems: "center", flexShrink: 0 }}
           >
             {user?.photo_url
@@ -3791,7 +4053,12 @@ export default function App() {
         {nextTask ? (
           <div
             style={{ background: "linear-gradient(135deg, #2563eb 0%, #4f86f7 100%)", borderRadius: "20px", padding: "20px", marginBottom: "1.3rem", position: "relative", overflow: "hidden", cursor: "pointer", boxShadow: "0 10px 30px rgba(37,99,235,0.28)" }}
-            onClick={() => { setStudentSelectedHomeworkId(nextTask.id); setStudentUploadStep("detail"); }}
+            onClick={() => {
+              setStudentWorkflowSubmission(null);
+              clearStudentUploadFile();
+              setStudentSelectedHomeworkId(nextTask.id);
+              setStudentUploadStep("detail");
+            }}
           >
             <div style={{ position: "absolute", top: -25, right: -25, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
             <span style={{ background: "rgba(255,255,255,0.18)", color: "white", fontSize: "0.65rem", fontWeight: 800, padding: "2px 10px", borderRadius: "99px", textTransform: "uppercase" }}>{nextTask.subject}</span>
@@ -3812,14 +4079,14 @@ export default function App() {
         {/* ── Quick actions ── */}
         <h3 style={{ margin: "0 0 10px", fontSize: "0.78rem", fontWeight: 800, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Tezkor kirish</h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "1.3rem" }}>
-          <button onClick={() => setCurrentTab("practice")} style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
+          <button onClick={() => navigateTo("practice")} style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
             <div style={{ width: 36, height: 36, borderRadius: "10px", background: "rgba(16,185,129,0.1)", color: "var(--secondary)", display: "grid", placeItems: "center", marginBottom: "10px" }}>
               <PenTool size={18} />
             </div>
             <div style={{ fontWeight: 800, fontSize: "0.88rem", color: "var(--text-main)", marginBottom: "2px" }}>Takrorlash</div>
             <div style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Oldingi misollar</div>
           </button>
-          <button onClick={() => setCurrentTab("tutor")} style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
+          <button onClick={() => navigateTo("tutor")} style={{ background: "white", borderRadius: "16px", padding: "16px", border: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }}>
             <div style={{ width: 36, height: 36, borderRadius: "10px", background: "rgba(139,92,246,0.1)", color: "#8b5cf6", display: "grid", placeItems: "center", marginBottom: "10px" }}>
               <MessageCircle size={18} />
             </div>
@@ -3836,7 +4103,12 @@ export default function App() {
               {completedHomeworks.slice(0, 3).map(hw => (
                 <div key={hw.id}
                   style={{ background: "white", borderRadius: "14px", padding: "12px 14px", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
-                  onClick={() => { setStudentSelectedHomeworkId(hw.id); setStudentUploadStep("result"); }}>
+                  onClick={() => {
+                    setStudentWorkflowSubmission(null);
+                    clearStudentUploadFile();
+                    setStudentSelectedHomeworkId(hw.id);
+                    setStudentUploadStep("result");
+                  }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <div style={{ width: 36, height: 36, borderRadius: "10px", background: "rgba(59,130,246,0.08)", display: "grid", placeItems: "center" }}>
                       <BookOpen size={16} color="var(--primary)" />
@@ -4017,6 +4289,26 @@ export default function App() {
         <div>
           <strong>AI javobingizni tekshiryapti</strong>
           <p>Rasm o'qilmoqda, yechimlar solishtirilmoqda va feedback saqlanmoqda.</p>
+          <div className="processing-steps">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderSoftLoading(title: string, detail: string) {
+    return (
+      <div className="submission-processing" aria-live="polite">
+        <div className="ai-loader">
+          <div className="ai-loader-ring"></div>
+          <RefreshCcw size={24} style={{ animation: "spin 1.2s linear infinite" }} />
+        </div>
+        <div>
+          <strong>{title}</strong>
+          <p>{detail}</p>
           <div className="processing-steps">
             <span></span>
             <span></span>
@@ -5272,7 +5564,7 @@ export default function App() {
             className="card card-interactive" 
             style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
             onClick={() => {
-              setCurrentTab("classes");
+              navigateTo("classes");
               setSelectedTeacherClassId("");
             }}
           >
@@ -5290,7 +5582,7 @@ export default function App() {
             className="card card-interactive" 
             style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
             onClick={() => {
-              setCurrentTab("tools");
+              navigateTo("tools");
               setToolsActiveView("diktant_checker");
               setDiktantStep(1);
             }}
@@ -5309,7 +5601,7 @@ export default function App() {
             className="card card-interactive" 
             style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
             onClick={() => {
-              setCurrentTab("tools");
+              navigateTo("tools");
               setToolsActiveView("test_checker");
               setTestStep(1);
             }}
@@ -5328,7 +5620,7 @@ export default function App() {
             className="card card-interactive" 
             style={{ padding: "1.2rem", display: "flex", flexDirection: "row", alignItems: "center", gap: "16px", cursor: "pointer" }}
             onClick={() => {
-              setCurrentTab("tools");
+              navigateTo("tools");
               setToolsActiveView("control_work");
               setCwStep(1);
             }}
@@ -5359,7 +5651,7 @@ export default function App() {
         <div className="card text-center" style={{ padding: "24px" }}>
            <Camera size={40} style={{ opacity: 0.5, margin: "0 auto 12px" }} />
            <p className="text-muted mb-3">Bu xususiyat endi Asosiy <b>Vazifalar</b> menyusi ichida to'g'ridan-to'g'ri ishlaydi.</p>
-           <button className="btn btn-primary" onClick={() => setCurrentTab("homeworks")}>Vazifalarga o'tish</button>
+           <button className="btn btn-primary" onClick={() => navigateTo("homeworks")}>Vazifalarga o'tish</button>
         </div>
       </div>
     );
@@ -5471,8 +5763,10 @@ export default function App() {
                 <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => setDiktantImage(e.target.files?.[0] || null)} />
               </label>
               <button className="btn btn-primary" style={{ width: "100%" }} disabled={!diktantImage || busyAction === "check-diktant"} onClick={() => void handleCheckDiktant()}>
+                {busyAction === "check-diktant" ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Send size={18} />}
                 {busyAction === "check-diktant" ? "Tekshirilmoqda..." : "AI bilan tekshirish"}
               </button>
+              {busyAction === "check-diktant" ? renderSoftLoading("Diktant tekshirilmoqda", "Yozuv o'qilib, original matn bilan solishtirilmoqda.") : null}
            </div>
         )}
 
@@ -5694,7 +5988,8 @@ export default function App() {
                  <div style={{ display: "flex", gap: "8px" }}>
                     <button className="btn btn-outline" style={{ flex: 1 }} onClick={() => { setTestStudentAnswers({}); setTestStep(4); }} disabled={!testStudent}>Qo'lda kiritish</button>
                     <button className="btn btn-primary" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }} disabled={!testStudent || !testImage || busyAction === "scan-test"} onClick={() => void handleCheckTestScan()}>
-                      <Camera size={16}/> {busyAction === "scan-test" ? "Skan..." : "Skaner"}
+                      {busyAction === "scan-test" ? <RefreshCcw size={16} style={{ animation: "spin 1.2s linear infinite" }} /> : <Camera size={16}/>}
+                      {busyAction === "scan-test" ? "Skan..." : "Skaner"}
                     </button>
                  </div>
               </div>
@@ -5729,8 +6024,10 @@ export default function App() {
                  ))}
               </div>
               <button className="btn btn-primary" style={{ width: "100%" }} disabled={busyAction === "check-test"} onClick={() => void handleCheckTestManual()}>
+                {busyAction === "check-test" ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Check size={18} />}
                 {busyAction === "check-test" ? "Tekshirilmoqda..." : "Tekshirish"}
               </button>
+              {busyAction === "check-test" ? renderSoftLoading("Test tekshirilmoqda", "Javob kaliti va o'quvchi javoblari solishtirilmoqda.") : null}
            </div>
         )}
 
@@ -5855,8 +6152,10 @@ export default function App() {
               </label>
 
               <button className="btn btn-primary" style={{ width: "100%" }} disabled={!cwImage || !cwStudent || busyAction === "check-control-work"} onClick={() => void handleCheckControlWork()}>
+                {busyAction === "check-control-work" ? <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} /> : <Send size={18} />}
                 {busyAction === "check-control-work" ? "Tekshirilmoqda..." : "AI bilan tekshirish"}
               </button>
+              {busyAction === "check-control-work" ? renderSoftLoading("Nazorat ishi tekshirilmoqda", "Yozuvlar o'qilib, yechimlar va umumiy feedback tayyorlanmoqda.") : null}
            </div>
         )}
 
@@ -6463,7 +6762,7 @@ export default function App() {
             Diskriminant hisoblashda xato ko'p uchramoqda. Belgilar bilan ishlashni mashq qiling. Qo'shimcha 5 ta mashq tavsiya qilinadi.
           </p>
           <button
-            onClick={() => setCurrentTab("practice")}
+            onClick={() => navigateTo("practice")}
             style={{ marginTop: "12px", background: "var(--primary)", color: "white", border: "none", borderRadius: "10px", padding: "8px 16px", fontWeight: 700, fontSize: "0.8rem", cursor: "pointer" }}
           >
             Mashqlarni boshlash →
