@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend /app/backend
 COPY app /app/app
-COPY firebase-adminsdk*.json /app/
+COPY README.md firebase-adminsdk*.json* /app/
 
 ENV PYTHONPATH="/app/backend:/app"
 ENV PORT=8000
