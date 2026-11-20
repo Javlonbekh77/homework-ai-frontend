@@ -334,7 +334,7 @@ def _build_tutor_messages(
                 f"- Vazifa: {item.get('homework_title')}; "
                 f"Masala #{item.get('problem_number') or '?'}; "
                 f"Holat: {item.get('status')}; "
-                f"O'quvchi javobi: {item.get('student_answer') or 'ko\'rinmadi'}; "
+                f"O'quvchi javobi: {item.get('student_answer') or 'topilmadi'}; "
                 f"To'g'ri javob: {item.get('expected_answer') or 'berilmagan'}; "
                 f"Aniqlangan xato: {item.get('label')}; "
                 f"Tavsiya: {item.get('suggestion') or item.get('feedback')}"
