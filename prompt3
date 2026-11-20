@@ -1,0 +1,905 @@
+PROJECT UPDATE — PHASE 7 + PHASE 8
+TEACHER TOOLS EXPANSION
+
+IMPORTANT:
+This is an existing Telegram Mini App.
+
+Current stack:
+- React
+- TypeScript
+- Vite
+- Tailwind
+- FastAPI
+- Firestore
+- Gemini
+- Telegram Mini App auth
+
+Existing product already includes:
+- Teacher / Student roles
+- Classes
+- Homework
+- Teacher image upload
+- Gemini question/answer extraction
+- Student handwritten submission
+- AI grading
+- score / mistakes / feedback
+- Question Bank work
+- Extra Practice design
+- AI Tutor design
+- Teacher Journal design
+
+DO NOT rebuild the project.
+DO NOT replace Firestore.
+DO NOT redesign the whole application.
+DO NOT implement the final backend integration phase yet.
+
+Focus on two new Teacher Tools:
+
+1. Diktant Checker
+2. Test + Nazorat Ishlarini Tekshirish
+
+The product is TEACHER-FIRST.
+
+==================================================
+PHASE 7 — DIKTANT CHECKER
+==================================================
+
+GOAL:
+
+Help Uzbek language teachers check handwritten dictation work faster.
+
+This feature lives inside:
+
+Teacher
+→ Tools
+→ Diktant Checker
+
+The first version should be simple, visual and demo-ready.
+
+==================================================
+1. TOOLS PAGE UPDATE
+==================================================
+
+Teacher Tools page should contain:
+
+Savollar banki
+AI Paper Checker
+Test Checker
+Diktant Checker
+
+Use clean mobile cards.
+
+Each card:
+- title
+- short description
+- simple line icon
+- open button / arrow
+
+No stickers.
+No mascots.
+
+==================================================
+2. DIKTANT CHECKER HOME
+==================================================
+
+Page title:
+
+"Diktant tekshirish"
+
+Subtitle:
+
+"O‘quvchilarning yozma diktant ishlarini AI yordamida tekshiring."
+
+Primary CTA:
+
+"+ Yangi tekshiruv"
+
+Below:
+
+Recent checks
+
+Example cards:
+
+Ali Valiyev
+8-A
+8/10
+6 xato
+
+Madina Karimova
+8-A
+9/10
+2 xato
+
+==================================================
+3. NEW DICTATION FLOW
+==================================================
+
+Use a simple mobile wizard:
+
+1. Sinf va o‘quvchi
+2. Original matn
+3. O‘quvchi ishi
+4. AI tahlil
+5. Natija
+
+Use a small step indicator at the top.
+
+==================================================
+4. STEP 1 — SELECT STUDENT
+==================================================
+
+Teacher selects:
+
+Class:
+8-A
+
+Student:
+Ali Valiyev
+
+Reuse existing class/student data if available.
+
+==================================================
+5. STEP 2 — REFERENCE TEXT
+==================================================
+
+Teacher provides the correct dictation text.
+
+Primary method:
+
+Textarea
+
+Example:
+
+"Bahor fasli boshlandi. Daraxtlar yashil libosga kirdi..."
+
+Optional secondary action:
+
+"Rasmdan olish"
+
+Only show this if current image/OCR flow can be reused easily.
+
+For demo, text input is enough.
+
+==================================================
+6. STEP 3 — STUDENT PAPER
+==================================================
+
+Teacher uploads student handwritten dictation image.
+
+Allow:
+
+Camera
+Gallery
+
+Show image preview.
+
+Short tips:
+
+- matn to‘liq ko‘rinsin
+- rasm tiniq bo‘lsin
+- soyalar kam bo‘lsin
+
+Button:
+
+"AI bilan tekshirish"
+
+==================================================
+7. AI CHECKING SCREEN
+==================================================
+
+Show:
+
+"AI diktantni tekshirmoqda..."
+
+Subtle status messages:
+
+"Yozuv o‘qilmoqda"
+
+"Original matn bilan solishtirilmoqda"
+
+"Imlo xatolari aniqlanmoqda"
+
+"Natija tayyorlanmoqda"
+
+No fake percentage.
+
+Use:
+- pulse animation
+- skeleton
+- smooth progress line
+
+==================================================
+8. DICTATION ERROR TYPES
+==================================================
+
+Frontend should support these result categories:
+
+Imlo xatosi
+Tinish belgisi
+Tushib qolgan so‘z
+Ortiqcha so‘z
+Noto‘g‘ri so‘z
+Katta/kichik harf
+
+Keep categories simple.
+
+==================================================
+9. DICTATION RESULT PAGE
+==================================================
+
+Top:
+
+Ali Valiyev
+
+8 / 10
+
+"Yaxshi"
+
+Summary cards:
+
+Jami xato
+6
+
+Imlo
+3
+
+Tinish belgisi
+1
+
+Tushib qolgan
+2
+
+Then:
+
+"Xatolar"
+
+Example card:
+
+Original:
+o‘quvchilar
+
+Student:
+oquvchilar
+
+Type:
+Imlo xatosi
+
+Another:
+
+Original:
+maktabga bordi.
+
+Student:
+maktabga bordi
+
+Type:
+Tinish belgisi
+
+==================================================
+10. TEACHER REVIEW
+==================================================
+
+Teacher must be able to:
+
+- remove an incorrect AI-detected error
+- edit error type
+- edit score
+- approve result
+
+Buttons:
+
+"Tahrirlash"
+
+"Natijani tasdiqlash"
+
+Later this result can go into Journal.
+
+For now prepare:
+
+"Jurnalga qo‘shish"
+
+button.
+
+If backend is not ready, this can use mock/demo behavior.
+
+==================================================
+11. DICTATION DESIGN
+==================================================
+
+Use:
+
+- white background
+- primary blue
+- soft red for errors
+- soft green for approved result
+- rounded cards
+- readable text comparison
+
+Avoid showing the full original/student text in one giant screen.
+
+Use error-by-error cards.
+
+==================================================
+PHASE 8 — TEST + NAZORAT CHECKER
+==================================================
+
+GOAL:
+
+Help teachers quickly check:
+
+- multiple-choice tests
+- written control work
+
+This feature should be inside:
+
+Teacher
+→ Tools
+→ Test Checker / Nazorat ishlari
+
+==================================================
+12. ASSESSMENT TOOLS HOME
+==================================================
+
+Page:
+
+"Test va nazorat"
+
+Two large cards:
+
+TEST
+
+"Javoblarni kalit bilan avtomatik tekshirish"
+
+[ Ochish ]
+
+NAZORAT ISHI
+
+"Yozma ishlarni AI yordamida tekshirish"
+
+[ Ochish ]
+
+==================================================
+13. TEST CHECKER FLOW
+==================================================
+
+Use:
+
+1. Sinf
+2. Test nomi
+3. Javob kaliti
+4. O‘quvchi javoblari
+5. Natija
+
+==================================================
+14. CREATE TEST
+==================================================
+
+Teacher enters:
+
+Test name:
+"Algebra Test #3"
+
+Class:
+8-A
+
+Question count:
+20
+
+Max score:
+20
+
+==================================================
+15. ANSWER KEY PAGE
+==================================================
+
+Create a very fast mobile answer-key input.
+
+Example:
+
+1   A B C D
+2   A B C D
+3   A B C D
+4   A B C D
+
+Teacher taps correct answer.
+
+Selected option becomes blue.
+
+Support 10–50 questions.
+
+Use scrollable list.
+
+Primary button:
+
+"Kalitni saqlash"
+
+==================================================
+16. STUDENT TEST CHECKING
+==================================================
+
+For demo support two options:
+
+A. Manual answer entry
+
+B. Student answer sheet image
+
+Image option should visually show:
+
+Camera
+Gallery
+
+If OCR/backend is not ready, use demo result service temporarily.
+
+Do not fake a production OCR claim.
+
+==================================================
+17. MANUAL STUDENT ANSWER ENTRY
+==================================================
+
+Teacher selects:
+
+Ali Valiyev
+
+Then enters:
+
+1 B
+2 A
+3 C
+...
+
+Use same fast A/B/C/D grid.
+
+Button:
+
+"Tekshirish"
+
+==================================================
+18. TEST RESULT
+==================================================
+
+Top:
+
+Ali Valiyev
+
+17 / 20
+
+85%
+
+Correct:
+17
+
+Wrong:
+3
+
+Wrong questions:
+
+5
+11
+18
+
+Buttons:
+
+"Natijani tasdiqlash"
+
+"Jurnalga qo‘shish"
+
+==================================================
+19. TEST BATCH PAGE
+==================================================
+
+This page is important.
+
+Teacher should see:
+
+Algebra Test #3
+
+8-A
+
+Tekshirildi:
+18 / 27
+
+O‘rtacha:
+76%
+
+Qolgan:
+9
+
+Student list:
+
+Ali Valiyev      17/20
+Madina Karimova  19/20
+Sardor Xasanov   14/20
+Javohir           Kutilmoqda
+
+Tap student to see detail.
+
+==================================================
+20. CONTROL WORK
+==================================================
+
+Do NOT build a second handwritten grading engine.
+
+Reuse the existing AI Paper Checker concept.
+
+Frontend flow:
+
+Teacher
+→ creates control work
+→ enters/loads answer key
+→ selects student
+→ uploads handwritten paper
+→ AI check
+→ result
+
+==================================================
+21. CONTROL WORK CREATE PAGE
+==================================================
+
+Fields:
+
+Nazorat nomi
+
+Class
+
+Subject
+
+Max score
+
+Answer key / reference
+
+Example:
+
+"Kvadrat tenglamalar nazorat ishi"
+
+8-A
+
+Matematika
+
+10 ball
+
+==================================================
+22. CONTROL WORK PAPER UPLOAD
+==================================================
+
+Same high-quality mobile upload UI:
+
+Camera
+Gallery
+Preview
+
+Then:
+
+"AI bilan tekshirish"
+
+Reuse existing components wherever possible.
+
+==================================================
+23. CONTROL WORK RESULT
+==================================================
+
+Example:
+
+Ali Valiyev
+
+7 / 10
+
+Summary:
+
+To‘g‘ri:
+4
+
+Qisman:
+2
+
+Xato:
+1
+
+Then short problem-level cards.
+
+Do not show huge raw AI explanations.
+
+Teacher can open details if necessary.
+
+==================================================
+24. ASSESSMENT OVERVIEW
+==================================================
+
+Teacher should see:
+
+Nazorat #2
+
+8-A
+
+Topshirdi:
+24 / 27
+
+O‘rtacha:
+7.4 / 10
+
+Eng yuqori:
+10
+
+Eng past:
+4
+
+Student list below.
+
+==================================================
+25. JOURNAL PREPARATION
+==================================================
+
+Both Phase 7 and Phase 8 screens should prepare for future Journal integration.
+
+Activity labels:
+
+Homework
+Practice
+Test
+Nazorat
+Diktant
+
+For now:
+
+"Jurnalga qo‘shish"
+
+can call an existing API if available.
+
+Otherwise keep it as demo-ready UI through a centralized mock service.
+
+Do NOT build full Journal backend in this task.
+
+==================================================
+26. MOCK DATA RULE
+==================================================
+
+For missing backend functions:
+
+Use:
+
+mockDictationService
+mockTestService
+mockAssessmentService
+
+or similar architecture.
+
+Do NOT put giant fake objects directly into UI components.
+
+Later these services must be replaceable with real APIs.
+
+==================================================
+27. DESIGN RULES
+==================================================
+
+This is still a Telegram Mini App but it must look like a native education app.
+
+Use consistent design from earlier phases:
+
+- primary blue
+- neutral background
+- soft green
+- soft orange
+- restrained red
+- rounded cards
+- clean typography
+- subtle shadows
+
+No stickers.
+No emojis as main visual elements.
+No mascots.
+
+==================================================
+28. ANIMATIONS
+==================================================
+
+Allowed:
+
+- button press scale
+- card fade
+- small slide
+- skeleton loading
+- success animation
+- progress ring/bar
+- expandable result sections
+
+Avoid complicated animation libraries.
+
+==================================================
+29. EMPTY STATES
+==================================================
+
+Examples:
+
+Diktant:
+
+"Hozircha diktant tekshiruvlari yo‘q."
+
+Test:
+
+"Hali test yaratilmagan."
+
+Control work:
+
+"Hali nazorat ishi yo‘q."
+
+Use simple icon + text + CTA.
+
+No stickers.
+
+==================================================
+30. RESPONSIVE MOBILE
+==================================================
+
+Test approximately:
+
+360px
+390px
+412px
+430px
+
+Requirements:
+
+- no horizontal overflow
+- buttons easy to tap
+- answer-key grid remains readable
+- result cards fit
+- bottom navigation does not cover content
+- keyboard does not hide textarea/input
+
+==================================================
+31. REUSE EXISTING COMPONENTS
+==================================================
+
+Reuse:
+
+- App Header
+- Teacher Navigation
+- Camera/Image Picker
+- Loading states
+- Result cards
+- Student selector
+- Class selector
+- Primary buttons
+- Modal / Bottom Sheet
+
+Do not duplicate components unnecessarily.
+
+==================================================
+32. FINAL TEACHER TOOLS PAGE
+==================================================
+
+The final Tools page should visually show:
+
+Savollar banki
+Material → savollar bazasi
+
+AI Paper Checker
+Yozma ishlarni tekshirish
+
+Test Checker
+Test javoblarini tekshirish
+
+Diktant Checker
+Imlo va diktantlarni tekshirish
+
+Each as a clean premium card.
+
+==================================================
+33. DO NOT IMPLEMENT YET
+==================================================
+
+Do NOT implement:
+
+- full real Diktant OCR backend if unavailable
+- full batch image scanning backend
+- Journal backend
+- final analytics engine
+- payment system
+- parents
+- public leaderboard
+- school admin
+- Phase 9 production integration
+
+This task is Phase 7 + Phase 8 only.
+
+==================================================
+34. REQUIRED DEMO FLOW — DIKTANT
+==================================================
+
+Teacher:
+
+1. opens Tools
+2. opens Diktant Checker
+3. starts new check
+4. selects 8-A
+5. selects Ali
+6. enters reference text
+7. uploads handwritten student image
+8. AI loading page
+9. result appears
+10. sees spelling/punctuation mistakes
+11. edits one result
+12. approves score
+13. presses Journal button
+
+==================================================
+35. REQUIRED DEMO FLOW — TEST
+==================================================
+
+Teacher:
+
+1. opens Test Checker
+2. creates Algebra Test #3
+3. enters 10-question answer key
+4. selects Ali
+5. enters student answers
+6. checks
+7. gets 8/10
+8. sees wrong question numbers
+9. confirms result
+10. returns to batch screen
+
+==================================================
+36. REQUIRED DEMO FLOW — CONTROL WORK
+==================================================
+
+Teacher:
+
+1. opens Nazorat
+2. creates control work
+3. selects class/student
+4. uploads paper
+5. AI checking
+6. sees score
+7. confirms result
+8. sees result in assessment overview
+
+==================================================
+37. BEFORE IMPLEMENTING
+==================================================
+
+First inspect the current project and tell me briefly:
+
+- which existing components can be reused
+- where Tools page currently lives
+- which Paper Checker flow can be reused
+- what will remain mock/demo
+- what new screens will be added
+
+Then implement.
+
+==================================================
+38. FINAL REPORT
+==================================================
+
+At the end report:
+
+1. Diktant screens created
+2. Test screens created
+3. Control Work screens created
+4. Existing components reused
+5. New components
+6. New mock services
+7. Existing APIs reused
+8. Features still mocked
+9. Design consistency status
+10. Mobile responsiveness status
+11. Bugs found/fixed
+12. What remains for later backend integration
+
+FINAL PHASE 7 + 8 GOAL:
+
+Teacher should be able to open one Tools area and visually understand that this application can help with:
+
+HOMEWORK
++
+PAPER CHECKING
++
+TESTS
++
+CONTROL WORK
++
+DICTATION
+
+The experience must stay teacher-first, minimal, app-like and demo-ready.
+
+END OF PHASE 7 + 8. 

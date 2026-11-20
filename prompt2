@@ -1,0 +1,1433 @@
+We already have a WORKING Phase 1 Python Telegram bot.
+
+IMPORTANT:
+
+Do NOT rebuild the project from scratch.
+
+Do NOT replace the existing Gemini integration.
+
+Do NOT break the existing working mathematics image-analysis pipeline.
+
+Before changing anything, inspect the entire existing codebase and understand how the current Telegram bot, Gemini API integration, prompts, image analysis, teacher sample analysis, answer-key generation, confirmation/editing flow, and student homework analysis currently work.
+
+The existing AI pipeline is valuable and must be preserved.
+
+We are now implementing PHASE 2.
+
+---
+
+# PRODUCT DIRECTION
+
+We are changing the user interface architecture.
+
+Instead of building all classroom management through Telegram messages and buttons, we want a TELEGRAM MINI APP.
+
+Telegram Bot will remain part of the system.
+
+The Telegram bot should mainly be used for:
+
+* `/start`
+* opening the Mini App
+* future notifications
+* fallback/error messages
+
+The main product interface should now live inside a Telegram Mini App.
+
+---
+
+# PHASE 2 PRIMARY GOAL
+
+Build a clean Telegram Mini App that introduces:
+
+1. Telegram-based user identity
+2. first-time role selection
+3. Teacher and Student interfaces
+4. Teacher class creation
+5. unique class join codes
+6. Student joining classes
+7. My Classes screens
+8. basic class details
+9. Firebase / Firestore persistence
+10. architecture prepared for homework, grades, AI feedback and analytics
+11. integration with the EXISTING Python/Gemini backend
+12. image upload infrastructure that DOES NOT permanently store homework images
+
+This should become the foundation of the complete product.
+
+---
+
+# VERY IMPORTANT ARCHITECTURAL PRINCIPLE
+
+The system should be separated conceptually into:
+
+TELEGRAM
+↓
+MINI APP FRONTEND
+↓
+PYTHON BACKEND
+↓
+Firestore + Gemini
+
+The frontend must NOT contain the Gemini API key.
+
+The frontend must NOT directly call Gemini.
+
+Gemini requests must continue through the existing Python backend.
+
+The backend remains the authority for:
+
+* Gemini API
+* AI prompts
+* homework analysis
+* answer-key generation
+* grading
+* Telegram authentication validation
+* sensitive Firestore writes where appropriate
+* authorization
+
+---
+
+# EXISTING PHASE 1 MUST SURVIVE
+
+Current functionality already includes approximately:
+
+Teacher:
+
+1. sends a textbook/workbook image;
+2. specifies which problems are homework;
+3. Gemini analyzes the page;
+4. system generates an answer key;
+5. teacher confirms or edits the answer key;
+6. student submits homework image;
+7. Gemini analyzes student work;
+8. system produces checking/feedback.
+
+Do not remove this logic.
+
+Refactor only when necessary.
+
+Prefer wrapping the existing logic in reusable services/API endpoints rather than rewriting it.
+
+Example:
+
+existing:
+
+Telegram handler
+↓
+Gemini service
+
+target:
+
+Telegram handler ──┐
+├── Gemini/Homework service
+Mini App API ──────┘
+
+Both interfaces should eventually be able to use the SAME AI service.
+
+---
+
+# FRONTEND STACK
+
+Build the Telegram Mini App using:
+
+* React
+* Vite
+* TypeScript
+* Telegram Mini Apps JavaScript API
+* clean modern CSS
+* optionally a lightweight component library if genuinely useful
+
+Do NOT introduce a heavy UI framework unnecessarily.
+
+The interface must work well on:
+
+* Telegram mobile
+* Telegram desktop
+
+Design mobile-first.
+
+---
+
+# DESIGN DIRECTION
+
+The product should look like a modern educational SaaS product, not like a generic Telegram bot.
+
+Visual direction:
+
+* clean
+* modern
+* friendly
+* academic
+* professional
+* generous whitespace
+* rounded cards
+* subtle borders
+* simple icons
+* strong typography hierarchy
+* restrained accent colors
+* clear success / warning / error states
+
+Avoid:
+
+* excessive gradients
+* excessive animation
+* childish design
+* too many colors
+* clutter
+
+Support Telegram light and dark themes where practical.
+
+Use Telegram theme parameters where possible, but preserve the product's own coherent visual identity.
+
+---
+
+# TELEGRAM MINI APP ENTRY
+
+Telegram bot `/start` should show approximately:
+
+"Homework AI — uyga vazifalarni AI yordamida tekshirish va tahlil qilish."
+
+Button:
+
+🚀 Ilovani ochish
+
+The button should open the Telegram Mini App.
+
+Do NOT force the user to perform the entire product flow through chat messages anymore.
+
+---
+
+# TELEGRAM AUTHENTICATION
+
+Use Telegram Mini App initData.
+
+VERY IMPORTANT:
+
+Never trust Telegram user information from the frontend alone.
+
+The frontend should send raw:
+
+Telegram.WebApp.initData
+
+to the Python backend.
+
+The Python backend must validate the Telegram Mini App initData signature according to Telegram's current official specification using the bot token.
+
+Only AFTER successful server-side validation may the backend trust:
+
+* Telegram user ID
+* username
+* first name
+* last name
+
+Do NOT trust `initDataUnsafe` as authentication.
+
+Create a clean authentication endpoint such as:
+
+POST /api/auth/telegram
+
+Request:
+
+{
+"init_data": "..."
+}
+
+Backend:
+
+1. validates signature;
+2. checks auth date where appropriate;
+3. extracts Telegram user;
+4. finds or creates Firestore user;
+5. returns safe application user data.
+
+Do NOT create email/password authentication.
+
+Telegram identity is the primary identity mechanism for the MVP.
+
+---
+
+# FIRST-TIME USER ONBOARDING
+
+When Mini App opens:
+
+Backend checks whether Telegram user exists.
+
+If no application profile exists:
+
+show an onboarding screen.
+
+Title:
+
+"Homework AI'ga xush kelibsiz"
+
+Subtitle:
+
+"Qanday foydalanmoqchisiz?"
+
+Two large cards:
+
+👨‍🏫 O‘qituvchi
+
+"Sinf yarating, vazifa bering va o‘quvchilar natijalarini kuzating."
+
+👨‍🎓 O‘quvchi
+
+"Sinfga qo‘shiling, vazifalarni bajaring va AI feedback oling."
+
+User selects exactly one role.
+
+Then show:
+
+"Ism va familiya"
+
+Pre-fill from Telegram when possible but allow editing.
+
+Save:
+
+users/{user_id}
+
+{
+telegram_id,
+telegram_username,
+full_name,
+role,
+created_at,
+updated_at
+}
+
+After saving, redirect to the corresponding dashboard.
+
+---
+
+# TEACHER MINI APP
+
+Teacher bottom navigation or main navigation should contain:
+
+🏠 Bosh sahifa
+📚 Sinflar
+📝 Vazifalar
+📊 Natijalar
+👤 Profil
+
+For PHASE 2:
+
+Fully implement:
+
+* Dashboard shell
+* Classes
+* Create class
+* Class details
+* Student list
+* Profile
+
+Homework and Results screens should have good placeholders and data architecture.
+
+Do NOT generate fake analytics.
+
+---
+
+# TEACHER DASHBOARD
+
+Example:
+
+Assalomu alaykum, Jamshid
+
+Cards:
+
+3
+Sinflar
+
+74
+O‘quvchilar
+
+0
+Faol vazifalar
+
+—
+
+O‘rtacha natija
+
+Below:
+
+"Sinflarim"
+
+Class cards.
+
+Example:
+
+8-A
+Matematika
+
+27 o‘quvchi
+
+[ Ochish ]
+
+If statistics do not yet exist, show truthful empty states.
+
+Never fabricate numbers except actual counts stored in Firestore.
+
+---
+
+# CREATE CLASS
+
+Teacher clicks:
+
+* Yangi sinf
+
+Open clean form/modal/page.
+
+Fields:
+
+Sinf nomi
+Example:
+8-A
+
+Fan
+Example:
+Matematika
+
+Button:
+
+Sinf yaratish
+
+Backend generates unique human-readable join code.
+
+Example:
+
+MATH-7K4P2
+
+Requirements:
+
+* unique
+* uppercase
+* easy to type
+* avoid ambiguous characters if practical
+* not sequential
+
+Store:
+
+classes/{class_id}
+
+{
+name,
+subject,
+teacher_id,
+join_code,
+created_at,
+updated_at,
+is_active
+}
+
+After creation:
+
+success screen/card:
+
+✅ Sinf yaratildi
+
+8-A
+Matematika
+
+Sinf kodi
+
+MATH-7K4P2
+
+Buttons:
+
+Koddan nusxa olish
+Sinfni ochish
+
+If Telegram sharing can safely be implemented later, prepare for it but do not overcomplicate Phase 2.
+
+---
+
+# TEACHER CLASS LIST
+
+Teacher should only see their own classes.
+
+Example cards:
+
+8-A
+Matematika
+27 o‘quvchi
+
+9-B
+Matematika
+23 o‘quvchi
+
+Teacher A must never access Teacher B's classes simply by changing a URL or class ID.
+
+Authorization must be enforced by backend, not just frontend.
+
+---
+
+# TEACHER CLASS DETAIL
+
+Page layout:
+
+8-A
+Matematika
+
+Join code:
+MATH-7K4P2
+
+Summary cards:
+
+27
+O‘quvchi
+
+0
+Vazifa
+
+—
+
+O‘rtacha
+
+Tabs:
+
+Overview
+O‘quvchilar
+Vazifalar
+Baholar
+
+For Phase 2 fully implement:
+
+Overview
+O‘quvchilar
+
+Vazifalar and Baholar can have clean empty states while preserving future architecture.
+
+---
+
+# STUDENT MINI APP
+
+Student navigation:
+
+🏠 Bosh sahifa
+📚 Sinflarim
+📝 Vazifalarim
+📊 Baholarim
+👤 Profil
+
+For Phase 2 fully implement:
+
+* dashboard
+* join class
+* my classes
+* class detail
+* profile
+
+Homework and grade screens should already exist visually with clean empty states.
+
+---
+
+# STUDENT DASHBOARD
+
+Example:
+
+Salom, Ali 👋
+
+Cards:
+
+2
+Sinflar
+
+0
+Faol vazifalar
+
+—
+
+O‘rtacha ball
+
+Primary action:
+
+* Sinfga qo‘shilish
+
+Below:
+
+Mening sinflarim
+
+---
+
+# JOIN CLASS FLOW
+
+Student clicks:
+
+Sinfga qo‘shilish
+
+Show input:
+
+"Sinf kodi"
+
+Example:
+
+MATH-7K4P2
+
+Normalize:
+
+* trim whitespace
+* uppercase
+
+Call backend.
+
+If invalid:
+
+"Bu kod bo‘yicha sinf topilmadi."
+
+If valid:
+
+show confirmation card:
+
+8-A
+Matematika
+
+Ustoz:
+Jamshid Karimov
+
+[ Sinfga qo‘shilish ]
+
+After confirmation:
+
+create membership.
+
+Use collection such as:
+
+class_members/{membership_id}
+
+{
+class_id,
+student_id,
+joined_at,
+status
+}
+
+Prevent duplicate membership.
+
+If already joined:
+
+"Siz allaqachon ushbu sinf a’zosisiz."
+
+---
+
+# STUDENT MY CLASSES
+
+Display joined classes as cards.
+
+Example:
+
+8-A
+Matematika
+
+Ustoz:
+Jamshid Karimov
+
+[ Ochish ]
+
+Student may only access a class if an active class membership exists.
+
+Backend must enforce this.
+
+---
+
+# STUDENT CLASS DETAIL
+
+Show:
+
+8-A
+Matematika
+
+Ustoz:
+Jamshid Karimov
+
+Tabs:
+
+Vazifalar
+Natijalar
+
+For now:
+
+If no homework exists:
+
+"Hozircha yangi vazifa mavjud emas."
+
+If no grades:
+
+"Hozircha baholar mavjud emas."
+
+Do NOT create mock homework in production data.
+
+---
+
+# FIRESTORE
+
+Connect the project to Firebase / Cloud Firestore.
+
+Use the SAME Firebase project for future Mini App and backend data.
+
+Primary persistent data:
+
+users
+classes
+class_members
+homeworks
+submissions
+
+Images must NOT be stored in Firestore.
+
+Images must NOT be stored in Firebase Storage for this MVP.
+
+---
+
+# FIRESTORE DATA MODEL
+
+## users
+
+users/{user_id}
+
+{
+telegram_id: number,
+telegram_username: string | null,
+full_name: string,
+role: "teacher" | "student",
+created_at: timestamp,
+updated_at: timestamp
+}
+
+Prefer a stable application/user document ID tied safely to Telegram identity.
+
+---
+
+## classes
+
+classes/{class_id}
+
+{
+name,
+subject,
+teacher_id,
+join_code,
+is_active,
+created_at,
+updated_at
+}
+
+---
+
+## class_members
+
+class_members/{membership_id}
+
+{
+class_id,
+student_id,
+joined_at,
+status: "active"
+}
+
+---
+
+# PREPARE HOMEWORK SCHEMA
+
+Even though full homework publishing will be Phase 3, prepare a clean schema.
+
+homeworks/{homework_id}
+
+{
+class_id,
+teacher_id,
+
+title,
+description,
+
+source_type: "image",
+
+original_task_image_stored: false,
+
+task_extraction: {
+source_description,
+selected_problem_range,
+problems: []
+},
+
+answer_key: {
+problems: []
+},
+
+max_score,
+deadline,
+
+allow_resubmission,
+
+status: "draft" | "published" | "closed",
+
+created_at,
+updated_at
+}
+
+IMPORTANT:
+
+We do NOT need to retain the original teacher textbook image.
+
+The existing Gemini pipeline should extract the meaningful structured content.
+
+Store the extracted task and approved answer key.
+
+Then discard the image.
+
+The approved structured answer key becomes the long-term reference.
+
+---
+
+# PREPARE SUBMISSION SCHEMA
+
+submissions/{submission_id}
+
+{
+homework_id,
+student_id,
+
+attempt_number,
+
+score,
+max_score,
+
+extracted_solution: {
+problems: []
+},
+
+mistakes: [],
+
+feedback,
+
+ai_confidence,
+
+submitted_at,
+
+status: "graded"
+}
+
+Again:
+
+NO original student image should be persisted.
+
+Store only the AI-extracted mathematical work and analysis.
+
+This is intentional.
+
+---
+
+# IMAGE PROCESSING ARCHITECTURE
+
+This is a critical requirement.
+
+When teacher or student uploads an image through the Mini App:
+
+Mini App
+↓
+multipart/form-data
+↓
+Python backend
+↓
+image temporarily held in memory or temporary file
+↓
+existing Gemini image analysis service
+↓
+structured result
+↓
+Firestore stores structured result
+↓
+temporary image deleted
+
+Do NOT upload the image to:
+
+* Firestore
+* Firebase Storage
+* S3
+* Cloudinary
+* permanent local storage
+
+The image exists only long enough to perform Gemini analysis.
+
+If a temporary file is used:
+
+delete it in a `finally` block.
+
+If reasonably possible, process the image from memory.
+
+---
+
+# IMPORTANT AUDIT DATA
+
+Because original student images will not be stored, preserve enough structured information to understand why a grade was generated.
+
+For example:
+
+{
+extracted_solution: {
+problem_1: {
+steps: [
+"...",
+"...",
+"..."
+],
+final_answer: "..."
+}
+},
+
+mistakes: [
+{
+problem_number: 1,
+step: 2,
+error_type: "sign_error",
+explanation: "..."
+}
+],
+
+score: 8,
+max_score: 10,
+
+feedback: "...",
+
+ai_confidence: 0.92
+}
+
+This data will later power:
+
+* gradebook
+* AI feedback
+* student history
+* class analytics
+* common mistakes
+* teacher recommendations
+
+without storing image files.
+
+---
+
+# BACKEND API LAYER
+
+The existing bot may currently call services directly.
+
+Do NOT duplicate Gemini logic.
+
+Introduce a lightweight API layer around the existing backend.
+
+FastAPI is preferred if the current Python structure allows it cleanly.
+
+Possible endpoints:
+
+POST /api/auth/telegram
+
+GET /api/me
+
+PATCH /api/me
+
+GET /api/classes
+
+POST /api/classes
+
+GET /api/classes/{class_id}
+
+GET /api/classes/{class_id}/students
+
+POST /api/classes/join
+
+GET /api/student/classes
+
+GET /api/homeworks
+
+POST /api/analyze/task-image
+
+POST /api/analyze/student-submission
+
+For Phase 2, fully implement only endpoints needed for:
+
+* auth
+* user profile
+* class creation
+* class listing
+* class detail
+* join class
+* student list
+
+For AI image endpoints:
+
+reuse existing services and prepare API integration.
+
+Do not unnecessarily rewrite working Phase 1 logic.
+
+---
+
+# CORS / SECURITY
+
+Configure CORS only for the Mini App frontend origin.
+
+Do not use `*` in production configuration if avoidable.
+
+Backend should authenticate Mini App requests.
+
+Never trust:
+
+* teacher_id sent by frontend
+* student_id sent by frontend
+
+Derive current user identity from validated Telegram authentication/session.
+
+Example:
+
+When creating a class:
+
+DO NOT accept arbitrary teacher_id.
+
+Use the authenticated current user.
+
+When joining:
+
+DO NOT accept arbitrary student_id.
+
+Use authenticated current user.
+
+---
+
+# ROLE AUTHORIZATION
+
+Backend must verify roles.
+
+Teacher-only:
+
+* create class
+* view owned class students
+* future create homework
+* future grade analytics
+
+Student-only:
+
+* join class
+* see student homework
+* see personal results
+
+Do not rely only on frontend UI hiding buttons.
+
+---
+
+# FRONTEND STATE
+
+Use a lightweight state solution.
+
+Do not overengineer.
+
+React Context or a small store is enough.
+
+Required states:
+
+* loading Telegram
+* authenticating
+* onboarding
+* teacher
+* student
+* API error
+* offline/network error
+
+---
+
+# UX STATES
+
+Every important page needs:
+
+Loading state
+
+Empty state
+
+Error state
+
+Success state
+
+Examples:
+
+Loading:
+
+"Yuklanmoqda..."
+
+Empty:
+
+"Hozircha sinflaringiz yo‘q."
+
+Error:
+
+"Ma’lumotlarni yuklashda xatolik yuz berdi."
+
+Retry:
+
+"Qayta urinish"
+
+---
+
+# MINI APP LAYOUT
+
+Use a polished app shell.
+
+Possible structure:
+
+Header
+Homework AI
+profile/avatar
+
+Page content
+
+Bottom navigation
+
+Teacher bottom navigation:
+
+Home
+Classes
+Homework
+Profile
+
+Student:
+
+Home
+Classes
+Homework
+Profile
+
+Keep it simple.
+
+Analytics/Grades may be accessible through class/homework screens initially.
+
+---
+
+# FIREBASE CONFIGURATION
+
+Use Firebase/Firestore cleanly.
+
+For the backend, use the official Firebase Admin SDK.
+
+Keep credentials server-side.
+
+Do NOT expose the Firebase service-account private key in frontend code.
+
+Create or update:
+
+.env.example
+
+with required variables.
+
+Possible backend values:
+
+TELEGRAM_BOT_TOKEN=
+GEMINI_API_KEY=
+GEMINI_MODEL=
+
+FIREBASE_PROJECT_ID=
+FIREBASE_CLIENT_EMAIL=
+FIREBASE_PRIVATE_KEY=
+
+Or use a local Firebase service-account JSON file if that matches the existing project better.
+
+If using JSON:
+
+* place outside source control;
+* add it to `.gitignore`;
+* document exact setup.
+
+For frontend, only use Firebase client SDK if actually necessary.
+
+Prefer API → backend → Firestore for sensitive business data to keep authorization centralized.
+
+Do NOT introduce unnecessary Firebase Authentication because Telegram authentication is already our identity layer.
+
+---
+
+# FIREBASE / FIRESTORE SETUP GUIDE
+
+At the end, provide exact manual setup instructions for me.
+
+Explain step-by-step:
+
+1. create/select Firebase project;
+2. enable Cloud Firestore;
+3. recommended Firestore location;
+4. create service account credentials;
+5. where to put credentials locally;
+6. environment variables;
+7. how to verify connection;
+8. which collections will be automatically created.
+
+Do NOT ask me to paste private keys into chat.
+
+---
+
+# TELEGRAM BOT CONFIGURATION
+
+Prepare clear instructions for connecting the Mini App to the existing Telegram bot.
+
+Document:
+
+* Mini App public HTTPS URL
+* BotFather configuration required
+* Web App button setup
+* `/start` behavior
+* testing inside Telegram
+
+Do NOT assume localhost will work directly inside Telegram.
+
+For development, document an appropriate HTTPS development tunnel option if necessary, but do not add unnecessary infrastructure unless needed.
+
+---
+
+# FIREBASE STUDIO
+
+If this project is being opened or managed through Firebase Studio, keep the frontend project compatible with normal Firebase development workflows.
+
+However:
+
+Do NOT make Firebase Studio itself a hard runtime dependency.
+
+The application architecture should work using standard:
+
+* React/Vite
+* Python backend
+* Firebase/Firestore
+
+Firebase Studio can be used as the development environment if desired.
+
+---
+
+# PRESERVE EXISTING GEMINI CONFIGURATION
+
+Continue using the project's current Gemini model/configuration.
+
+Do NOT silently replace the Gemini model.
+
+Do NOT migrate to a different Gemini SDK unless the existing one is broken or deprecated.
+
+If a change is required:
+
+explain it before changing the AI integration.
+
+The current image-analysis quality is already working and regression must be avoided.
+
+---
+
+# REGRESSION TEST
+
+Before considering Phase 2 complete, verify:
+
+CURRENT PHASE 1:
+
+✅ Teacher image analysis still works
+
+✅ Selected problem range still works
+
+✅ Answer key generation still works
+
+✅ Teacher confirmation/edit still works
+
+✅ Student image analysis still works
+
+✅ Gemini feedback still works
+
+NEW PHASE 2:
+
+✅ Telegram opens Mini App
+
+✅ Telegram user identity validates server-side
+
+✅ New user role selection works
+
+✅ Role persists
+
+✅ Teacher dashboard works
+
+✅ Teacher creates class
+
+✅ Unique code generated
+
+✅ Student dashboard works
+
+✅ Student enters class code
+
+✅ Student joins class
+
+✅ Duplicate membership blocked
+
+✅ Teacher sees student in class
+
+✅ Firestore persists all records
+
+✅ App survives backend restart without losing users/classes
+
+✅ No uploaded homework images are permanently stored
+
+---
+
+# DO NOT BUILD YET
+
+Do NOT implement the full Phase 3 yet.
+
+Do NOT build:
+
+* full homework publishing workflow
+* complete grading history
+* gradebook table
+* AI class analytics
+* common-error dashboard
+* teacher lesson recommendations
+* multiple subjects
+* payments
+* parent accounts
+* push notification engine
+* Firebase Storage image persistence
+* standalone public website
+
+We are building the foundation first.
+
+---
+
+# PROJECT STRUCTURE
+
+Do not blindly restructure existing working files.
+
+Inspect first.
+
+A possible target structure:
+
+backend/
+app/
+api/
+auth.py
+classes.py
+users.py
+analysis.py
+
+```
+    services/
+        telegram_auth.py
+        firebase_service.py
+        user_service.py
+        class_service.py
+        gemini_service.py
+        homework_service.py
+
+    models/
+        schemas.py
+
+    bot/
+        handlers.py
+        keyboards.py
+
+    main.py
+```
+
+frontend/
+src/
+components/
+pages/
+Onboarding/
+TeacherDashboard/
+StudentDashboard/
+Classes/
+ClassDetail/
+Profile/
+
+```
+    services/
+        api.ts
+        telegram.ts
+
+    context/
+    types/
+
+package.json
+vite.config.ts
+```
+
+This is only guidance.
+
+Preserve existing project structure when possible.
+
+---
+
+# IMPLEMENTATION ORDER
+
+Work in this order:
+
+STEP 1
+Inspect existing project and map existing AI functionality.
+
+STEP 2
+Introduce Firestore connection.
+
+STEP 3
+Create user/class/membership services.
+
+STEP 4
+Create Telegram Mini App authentication endpoint with secure initData validation.
+
+STEP 5
+Create required backend APIs.
+
+STEP 6
+Create React/Vite Mini App shell.
+
+STEP 7
+Implement onboarding and role selection.
+
+STEP 8
+Implement Teacher dashboard and class creation.
+
+STEP 9
+Implement Student dashboard and join-class flow.
+
+STEP 10
+Connect real Firestore data.
+
+STEP 11
+Add Mini App launch button to Telegram bot.
+
+STEP 12
+Perform regression tests on existing Gemini functionality.
+
+Do not jump ahead to Phase 3.
+
+---
+
+# DEVELOPMENT PRINCIPLES
+
+This is a hackathon MVP.
+
+Prioritize:
+
+1. working functionality;
+2. preservation of current AI functionality;
+3. clean UX;
+4. secure Telegram identity;
+5. reliable Firestore persistence;
+6. simple architecture;
+7. fast iteration.
+
+Avoid overengineering.
+
+---
+
+# FINAL REPORT
+
+When finished, report:
+
+1. existing Phase 1 architecture you preserved;
+2. files created;
+3. files modified;
+4. frontend architecture;
+5. backend endpoints;
+6. Firestore collections/schema;
+7. environment variables required;
+8. manual Firebase setup steps;
+9. manual BotFather/Mini App setup steps;
+10. exact frontend run command;
+11. exact backend run command;
+12. how to test Teacher flow;
+13. how to test Student flow;
+14. how image uploads will work without permanent storage;
+15. any unresolved issues;
+16. explicit confirmation that existing Gemini image analysis was regression-tested.
+
+Do NOT proceed to Phase 3 automatically.

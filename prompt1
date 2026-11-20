@@ -1,0 +1,372 @@
+We are building an AI homework-checking product step by step.
+
+For this task, implement ONLY PHASE 1.
+
+Do NOT build the full product yet.
+
+# PHASE 1 GOAL
+
+Build a minimal Python Telegram bot that receives a photo of a student's handwritten mathematics work, sends the image to the Gemini API for multimodal analysis, extracts the mathematical content, analyzes the solution, and returns a readable result to the Telegram user.
+
+The purpose of this phase is NOT to create a production-ready homework platform.
+
+The purpose is to test how accurately Gemini can:
+
+1. read handwritten mathematics from photos;
+2. identify separate problems;
+3. transcribe mathematical expressions;
+4. reconstruct the student's solution steps;
+5. detect obvious mathematical or arithmetic mistakes;
+6. identify the final answer;
+7. explicitly indicate uncertain or unreadable parts.
+
+# IMPORTANT SCOPE LIMITS
+
+Do NOT implement any of these yet:
+
+* database
+* Firebase
+* Firestore
+* authentication
+* teacher/student roles
+* classes
+* homework assignment system
+* teacher admin panel
+* student profiles
+* statistics
+* web dashboard
+* grading against teacher answers
+* deployment
+* Docker
+* Redis
+* PostgreSQL
+* RAG
+* vector database
+
+Keep this project intentionally small.
+
+# TECH STACK
+
+Use:
+
+* Python 3.10+
+* aiogram for Telegram bot
+* official current Google Gemini Python SDK
+* python-dotenv
+* Pydantic if useful for structured response validation
+
+Use current official APIs and libraries.
+
+Do not use deprecated Gemini SDKs or deprecated API methods.
+
+Before implementing Gemini integration, inspect the current official Gemini API documentation if needed and use the currently recommended SDK/interface.
+
+# ENVIRONMENT VARIABLES
+
+Create:
+
+`.env.example`
+
+with:
+
+TELEGRAM_BOT_TOKEN=
+GEMINI_API_KEY=
+
+The real `.env` file must be ignored by Git.
+
+Create a proper `.gitignore`.
+
+Never hardcode API keys.
+
+# PROJECT STRUCTURE
+
+Keep the structure simple and understandable.
+
+Prefer something close to:
+
+app/
+**init**.py
+bot.py
+gemini_service.py
+prompts.py
+schemas.py
+
+main.py
+requirements.txt
+.env.example
+.gitignore
+README.md
+
+Do not create unnecessary abstractions.
+
+# TELEGRAM BOT BEHAVIOR
+
+When the bot starts and the user sends:
+
+/start
+
+reply in Uzbek:
+
+"Salom! Matematikadan ishlagan vazifangiz rasmini yuboring. Men rasmdagi yechimni o‘qib, tahlil qilib beraman."
+
+When the user sends a photo:
+
+1. choose the highest-resolution Telegram photo version;
+2. download it into memory or a temporary file;
+3. show the user a status message such as:
+
+"🔍 Rasm tahlil qilinmoqda..."
+
+4. send the image to Gemini;
+5. parse Gemini's result;
+6. return a readable Uzbek analysis.
+
+Do not permanently store uploaded student images.
+
+Delete temporary files after analysis if temporary files are used.
+
+# GEMINI ANALYSIS
+
+Gemini must receive the image and a carefully designed system/task prompt.
+
+The model must act as a mathematics handwriting analyzer.
+
+It must NOT invent content that it cannot clearly read.
+
+Use a structured output schema.
+
+Target internal JSON structure:
+
+{
+"image_quality": "good | medium | poor",
+"overall_confidence": 0.0,
+"problems": [
+{
+"problem_number": "1",
+"problem_text": "",
+"student_steps": [
+""
+],
+"final_answer": "",
+"status": "correct | incorrect | uncertain",
+"errors": [
+{
+"step": "",
+"description": "",
+"suggestion": ""
+}
+],
+"unreadable_parts": [
+""
+],
+"confidence": 0.0
+}
+],
+"general_feedback": ""
+}
+
+Confidence must be between 0 and 1.
+
+If Gemini cannot determine whether a solution is correct because the original question or handwriting is unclear, status MUST be "uncertain", not "incorrect".
+
+Do not force the AI to claim certainty.
+
+# IMPORTANT MATHEMATICAL RULE
+
+At this phase there is NO teacher answer key.
+
+Therefore Gemini may independently verify mathematical transformations and arithmetic where possible.
+
+However:
+
+* it must distinguish transcription uncertainty from mathematical error;
+* it must not invent missing steps;
+* it must not assume unreadable symbols;
+* it must not mark a solution incorrect only because the student's method differs from a typical method;
+* alternative mathematically valid methods must be accepted;
+* if there is insufficient context, mark the result as uncertain.
+
+# GEMINI PROMPT
+
+Create the core prompt in `prompts.py`.
+
+The prompt should essentially instruct Gemini:
+
+You are analyzing a photograph of a student's handwritten mathematics work.
+
+Your first priority is accurate reading, not grading.
+
+Perform these tasks:
+
+1. Identify each separate mathematical problem visible in the image.
+2. Transcribe the original problem if visible.
+3. Transcribe the student's work step by step.
+4. Preserve mathematical signs carefully, including:
+
+   * negative signs
+   * exponents
+   * fractions
+   * square roots
+   * parentheses
+   * equality signs
+5. Determine the student's final answer if visible.
+6. Independently check the mathematical reasoning where enough information is available.
+7. Identify the FIRST step where a mathematical error occurs.
+8. Explain downstream errors separately when they are consequences of an earlier mistake.
+9. If handwriting or a symbol is unclear, explicitly mark it as unreadable or uncertain.
+10. Never guess an unreadable symbol merely to complete an equation.
+11. Accept alternative valid solution methods.
+12. Return data strictly according to the response schema.
+
+The model's analysis should be suitable for later use in a real homework checking system.
+
+# USER-FACING TELEGRAM RESPONSE
+
+Do not send raw JSON to the user by default.
+
+Format it in Uzbek.
+
+Example:
+
+📄 Rasm sifati: Yaxshi
+🎯 AI ishonchi: 94%
+
+1️⃣ 1-masala
+
+Masala:
+x² - 5x + 6 = 0
+
+AI o‘qigan yechim:
+
+1. (x - 2)(x - 3) = 0
+2. x = 2
+3. x = 3
+
+Yakuniy javob:
+x = 2, 3
+
+Holat: ✅ To‘g‘ri
+
+---
+
+2️⃣ 2-masala
+
+AI o‘qigan yechim:
+...
+
+Holat: ❌ Xato
+
+Birinchi aniqlangan xato:
+D = 9 - 16
+
+Izoh:
+c manfiy bo‘lgani uchun -4ac musbat qiymat beradi.
+
+💡 Tavsiya:
+Diskriminantdagi ishorani qayta tekshiring.
+
+If uncertain:
+
+Holat: ⚠️ Aniqlab bo‘lmadi
+
+Sabab:
+Rasmda "+" yoki "-" belgisi aniq ko‘rinmayapti.
+
+# ERROR HANDLING
+
+Handle these cases cleanly:
+
+* user sends text instead of photo;
+* unsupported media;
+* Telegram file download error;
+* missing environment variable;
+* Gemini API error;
+* Gemini timeout;
+* invalid structured output;
+* no mathematical content found;
+* poor image quality;
+* multiple images sent separately.
+
+Never crash the bot because one request failed.
+
+User-facing errors should be in Uzbek and understandable.
+
+Example:
+
+"Rasmni yetarlicha aniq o‘qiy olmadim. Iltimos, yorug‘roq joyda, kamerani daftar ustiga to‘g‘ri tutib qayta suratga oling."
+
+# LOGGING
+
+Add simple console logging for development.
+
+Log:
+
+* bot started
+* image received
+* Gemini request started
+* Gemini request completed
+* errors
+
+Do NOT log API keys.
+
+Avoid logging full student image contents.
+
+# README
+
+Create a concise README containing:
+
+1. project purpose;
+2. Python version;
+3. installation commands;
+4. how to create `.env`;
+5. how to run the bot;
+6. expected Telegram flow;
+7. current Phase 1 limitations.
+
+Commands should be copy-paste ready.
+
+# TESTING / VERIFICATION
+
+After implementation:
+
+1. install the dependencies;
+2. check that imports succeed;
+3. verify the project starts correctly when environment variables are present;
+4. identify syntax/runtime issues and fix them;
+5. inspect the implementation for deprecated Gemini API usage;
+6. make sure `.env` is excluded by Git;
+7. do not proceed to any Phase 2 functionality.
+
+If real API keys are not available, still verify everything possible locally and clearly tell me exactly where I need to put:
+
+* TELEGRAM_BOT_TOKEN
+* GEMINI_API_KEY
+
+# DEVELOPMENT STYLE
+
+I am building this as an MVP/hackathon project.
+
+Prioritize:
+
+1. working code;
+2. clarity;
+3. reliability;
+4. easy debugging;
+5. minimal complexity.
+
+Do not overengineer.
+
+Before making major implementation decisions, create a short implementation plan.
+
+Then implement Phase 1 completely.
+
+At the end, report:
+
+* files created;
+* packages used;
+* exact command to run the bot;
+* exactly what I need to fill in manually;
+* any issues that remain;
+* a short manual test checklist.
+
+Do NOT start Phase 2.
