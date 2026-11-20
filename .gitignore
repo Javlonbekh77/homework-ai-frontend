@@ -21,3 +21,4 @@ node_modules/
 .DS_Store
 dist/
 frontend/dist/
+muammo.txt

@@ -43,6 +43,9 @@ import {
   Clock,
   Bell,
   Sparkles,
+  ThumbsUp,
+  RotateCw,
+  ArrowUp,
 } from "lucide-react";
 import "./App.css";
 import {
@@ -675,6 +678,12 @@ export default function App() {
   });
 
   const [tutorSidebarOpen, setTutorSidebarOpen] = useState(false);
+  const [tutorSearchQuery, setTutorSearchQuery] = useState("");
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState("");
+  const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
+  const [likedMessages, setLikedMessages] = useState<Record<string, boolean>>({});
+  const [showFormulaPicker, setShowFormulaPicker] = useState(false);
   const [copiedSummaryId, setCopiedSummaryId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -2424,9 +2433,11 @@ export default function App() {
     );
   }
 
+  const isTutorActive = user.role === "student" && !studentSelectedHomeworkId && currentTab === "tutor";
+
   return (
-    <main className="app-container">
-      <section className="page-content pb-20" style={{ paddingTop: "1.2rem" }}>
+    <main className={`app-container ${isTutorActive ? "claude-tutor-active" : ""}`}>
+      <section className={`page-content ${isTutorActive ? "tutor-view-mode" : "pb-20"}`} style={{ paddingTop: isTutorActive ? 0 : "1.2rem" }}>
         {refreshing ? (
           <div style={{
             display: "flex",
@@ -7274,7 +7285,6 @@ export default function App() {
 
   function renderTutor() {
     const tutorInsights = buildProgressInsights(homeworks, studentSubmissionsByHomework);
-    // Real mistakes from student homeworks; empty array if no mistakes!
     const tutorMistakes = tutorInsights.mistakes;
 
     const currentActiveSession =
@@ -7316,6 +7326,24 @@ export default function App() {
     const handleSelectChat = (sessionId: string) => {
       setActiveSessionId(sessionId);
       setTutorSidebarOpen(false);
+      setEditingSessionId(null);
+    };
+
+    const handleStartRename = (sessionId: string, currentTitle: string, e?: React.MouseEvent) => {
+      e?.stopPropagation();
+      setEditingSessionId(sessionId);
+      setEditingSessionTitle(currentTitle);
+    };
+
+    const handleSaveRename = (sessionId: string, e?: React.FormEvent) => {
+      e?.preventDefault();
+      e?.stopPropagation();
+      if (editingSessionTitle.trim()) {
+        setTutorSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? { ...s, title: editingSessionTitle.trim() } : s))
+        );
+      }
+      setEditingSessionId(null);
     };
 
     const updateSessionWithUserMsg = (
@@ -7327,7 +7355,7 @@ export default function App() {
           if (session.id !== sessionId) return session;
           const isInitialTitle = session.title === "Yangi suhbat" || !session.title;
           const newTitle = isInitialTitle
-            ? userMsg.text.slice(0, 26) + (userMsg.text.length > 26 ? "..." : "")
+            ? userMsg.text.slice(0, 28) + (userMsg.text.length > 28 ? "..." : "")
             : session.title;
           return {
             ...session,
@@ -7353,13 +7381,13 @@ export default function App() {
       );
     };
 
-    const handleSendTutor = async (e: React.FormEvent) => {
-      e.preventDefault();
+    const handleSendTutor = async (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
       if (!user || !studentTutorInput.trim() || busyAction === "student-tutor") return;
 
       const messageText = studentTutorInput.trim();
       const targetSessionId = currentActiveSession.id;
-      const history = currentActiveSession.messages.map(({ sender, text }) => ({ sender, text })).slice(-6);
+      const history = currentActiveSession.messages.map(({ sender, text }) => ({ sender, text })).slice(-8);
       const newUserMsg = { sender: "user" as const, text: messageText, time: "Hozir" };
 
       updateSessionWithUserMsg(targetSessionId, newUserMsg);
@@ -7398,7 +7426,7 @@ export default function App() {
     const handleQuickQuestion = async (questionText: string) => {
       if (!user || busyAction === "student-tutor") return;
       const targetSessionId = currentActiveSession.id;
-      const history = currentActiveSession.messages.map(({ sender, text }) => ({ sender, text })).slice(-6);
+      const history = currentActiveSession.messages.map(({ sender, text }) => ({ sender, text })).slice(-8);
       const newUserMsg = { sender: "user" as const, text: questionText, time: "Hozir" };
 
       updateSessionWithUserMsg(targetSessionId, newUserMsg);
@@ -7433,23 +7461,279 @@ export default function App() {
       }
     };
 
+    const handleRegenerate = (index: number) => {
+      const messages = currentActiveSession.messages;
+      for (let i = index - 1; i >= 0; i--) {
+        if (messages[i].sender === "user") {
+          handleQuickQuestion(messages[i].text);
+          return;
+        }
+      }
+      handleQuickQuestion("Mavzuni boshqacha usulda tushuntirib bering");
+    };
+
+    const filteredSessions = tutorSessions.filter((s) =>
+      (s.title || "").toLowerCase().includes(tutorSearchQuery.toLowerCase())
+    );
+
+    // Claude.ai-style Markdown renderer with thought accordion and math badges
+    const renderClaudeMarkdown = (
+      rawText: string,
+      msgIdx: number
+    ) => {
+      let thought = "";
+      let content = rawText;
+
+      const thinkRegex = /<think>([\s\S]*?)<\/think>/i;
+      const match = rawText.match(thinkRegex);
+      if (match) {
+        thought = match[1].trim();
+        content = rawText.replace(thinkRegex, "").trim();
+      } else if (rawText.toLowerCase().startsWith("tahlil jarayoni:") || rawText.toLowerCase().startsWith("fikrlash:")) {
+        const parts = rawText.split("\n\n");
+        if (parts.length > 1) {
+          thought = parts[0].replace(/^(tahlil jarayoni:|fikrlash:)/i, "").trim();
+          content = parts.slice(1).join("\n\n").trim();
+        }
+      }
+
+      const isThoughtExpanded = !!expandedThoughts[`msg_${msgIdx}`];
+
+      const formatInline = (str: string): ReactNode[] => {
+        const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\$[^$]+\$)/g;
+        const parts = str.split(regex);
+        return parts.map((part, i) => {
+          if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+            return (
+              <code
+                key={i}
+                style={{
+                  background: "#27272a",
+                  color: "#38bdf8",
+                  padding: "2px 6px",
+                  borderRadius: "5px",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  fontSize: "0.85em",
+                  border: "1px solid #3f3f46",
+                }}
+              >
+                {part.slice(1, -1)}
+              </code>
+            );
+          }
+          if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
+            return (
+              <span
+                key={i}
+                style={{
+                  background: "rgba(56, 189, 248, 0.12)",
+                  color: "#38bdf8",
+                  padding: "2px 7px",
+                  borderRadius: "5px",
+                  fontFamily: "ui-monospace, monospace",
+                  fontWeight: 700,
+                  fontSize: "0.88em",
+                  border: "1px solid rgba(56, 189, 248, 0.25)",
+                }}
+              >
+                {part.slice(1, -1)}
+              </span>
+            );
+          }
+          if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+            return (
+              <strong key={i} style={{ color: "#ffffff", fontWeight: 700 }}>
+                {part.slice(2, -2)}
+              </strong>
+            );
+          }
+          if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+            return (
+              <em key={i} style={{ color: "#e4e4e7" }}>
+                {part.slice(1, -1)}
+              </em>
+            );
+          }
+          return part;
+        });
+      };
+
+      const paragraphs = content.split("\n\n");
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
+          {/* Claude Thought Accordion */}
+          {thought && (
+            <div style={{ marginBottom: "6px" }}>
+              <button
+                type="button"
+                onClick={() =>
+                  setExpandedThoughts((prev) => ({
+                    ...prev,
+                    [`msg_${msgIdx}`]: !prev[`msg_${msgIdx}`],
+                  }))
+                }
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  background: "rgba(255, 255, 255, 0.05)",
+                  border: "1px solid rgba(255, 255, 255, 0.12)",
+                  borderRadius: "8px",
+                  padding: "5px 10px",
+                  color: "#a1a1aa",
+                  fontSize: "0.76rem",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <Sparkles size={12} color="#a855f7" />
+                <span>Tahlil va rejalashtirish qadamlari</span>
+                <ChevronRight
+                  size={13}
+                  style={{
+                    transform: isThoughtExpanded ? "rotate(90deg)" : "none",
+                    transition: "transform 0.2s ease",
+                  }}
+                />
+              </button>
+              {isThoughtExpanded && (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    padding: "10px 14px",
+                    background: "rgba(0, 0, 0, 0.35)",
+                    borderLeft: "3px solid #8b5cf6",
+                    borderRadius: "0 8px 8px 0",
+                    color: "#cbd5e1",
+                    fontSize: "0.8rem",
+                    lineHeight: 1.55,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {thought}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Content Paragraphs & Lists */}
+          {paragraphs.map((para, pIdx) => {
+            const lines = para.split("\n");
+
+            if (lines[0].startsWith("#")) {
+              const hText = lines[0].replace(/^#+\s*/, "");
+              return (
+                <div key={pIdx}>
+                  <h4 style={{ margin: "10px 0 6px", fontSize: "1rem", fontWeight: 800, color: "#ffffff", letterSpacing: "0.2px" }}>
+                    {formatInline(hText)}
+                  </h4>
+                  {lines.slice(1).map((subLine, sIdx) => (
+                    <p key={sIdx} style={{ margin: "4px 0", lineHeight: 1.65, color: "#d4d4d8" }}>
+                      {formatInline(subLine)}
+                    </p>
+                  ))}
+                </div>
+              );
+            }
+
+            const isNumberedList = lines.some((l) => /^\d+\.\s/.test(l.trim()));
+            if (isNumberedList) {
+              return (
+                <div key={pIdx} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {lines.map((l, lIdx) => {
+                    const numMatch = l.trim().match(/^(\d+)\.\s(.*)/);
+                    if (numMatch) {
+                      return (
+                        <div key={lIdx} style={{ display: "flex", gap: "8px", alignItems: "flex-start", lineHeight: 1.65 }}>
+                          <span style={{ fontWeight: 800, color: "#60a5fa", flexShrink: 0, minWidth: "18px" }}>
+                            {numMatch[1]}.
+                          </span>
+                          <div style={{ flex: 1, color: "#e4e4e7" }}>
+                            {formatInline(numMatch[2])}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={lIdx} style={{ paddingLeft: "26px", color: "#a1a1aa", fontSize: "0.88rem", lineHeight: 1.55 }}>
+                        {formatInline(l)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
+
+            const isBulletList = lines.some((l) => /^[-*•]\s/.test(l.trim()));
+            if (isBulletList) {
+              return (
+                <div key={pIdx} style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {lines.map((l, lIdx) => {
+                    const bMatch = l.trim().match(/^[-*•]\s(.*)/);
+                    if (bMatch) {
+                      return (
+                        <div key={lIdx} style={{ display: "flex", gap: "8px", alignItems: "flex-start", lineHeight: 1.65 }}>
+                          <span style={{ color: "#38bdf8", flexShrink: 0, marginTop: "2px" }}>•</span>
+                          <div style={{ flex: 1, color: "#e4e4e7" }}>
+                            {formatInline(bMatch[1])}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={lIdx} style={{ paddingLeft: "16px", color: "#a1a1aa", fontSize: "0.88rem", lineHeight: 1.55 }}>
+                        {formatInline(l)}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }
+
+            return (
+              <p key={pIdx} style={{ margin: 0, lineHeight: 1.7, color: "#e4e4e7", fontSize: "0.92rem" }}>
+                {lines.map((line, lIdx) => (
+                  <span key={lIdx}>
+                    {formatInline(line)}
+                    {lIdx < lines.length - 1 && <br />}
+                  </span>
+                ))}
+              </p>
+            );
+          })}
+        </div>
+      );
+    };
+
     return (
-      <div className="animate-fade-in" style={{ height: "calc(100dvh - 72px)", display: "flex", position: "relative", overflow: "hidden", margin: "-1.2rem -1rem 0" }}>
-        {/* Backdrop for mobile sidebar */}
+      <div
+        className="animate-fade-in"
+        style={{
+          height: "100dvh",
+          display: "flex",
+          position: "relative",
+          overflow: "hidden",
+          background: "#1e1e1e",
+          color: "#f4f4f5",
+          width: "100%",
+        }}
+      >
+        {/* Backdrop for mobile drawer */}
         {tutorSidebarOpen && (
           <div
             onClick={() => setTutorSidebarOpen(false)}
             style={{
               position: "fixed",
               inset: 0,
-              background: "rgba(0, 0, 0, 0.6)",
+              background: "rgba(0, 0, 0, 0.75)",
               zIndex: 998,
-              backdropFilter: "blur(2px)",
+              backdropFilter: "blur(4px)",
             }}
           />
         )}
 
-        {/* Claude.ai-style Sidebar */}
+        {/* ── Claude.ai-style Left Sidebar ── */}
         <aside
           style={{
             position: tutorSidebarOpen ? "fixed" : "relative",
@@ -7461,32 +7745,37 @@ export default function App() {
             background: "#18181b",
             color: "#f4f4f5",
             zIndex: 999,
-            display: tutorSidebarOpen ? "flex" : "none",
+            display: tutorSidebarOpen ? "flex" : undefined,
             flexDirection: "column",
             borderRight: "1px solid #27272a",
-            boxShadow: tutorSidebarOpen ? "4px 0 24px rgba(0,0,0,0.4)" : "none",
+            boxShadow: tutorSidebarOpen ? "4px 0 28px rgba(0,0,0,0.6)" : "none",
             transition: "all 0.25s ease",
+            flexShrink: 0,
           }}
+          className={!tutorSidebarOpen ? "claude-sidebar-desktop" : ""}
         >
           {/* Sidebar Top: Logo & Close */}
           <div style={{ padding: "16px 14px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #27272a" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <div style={{ width: "30px", height: "30px", borderRadius: "8px", background: "linear-gradient(135deg, var(--primary) 0%, #8b5cf6 100%)", color: "white", display: "grid", placeItems: "center" }}>
-                <Sparkles size={16} />
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div style={{ width: "32px", height: "32px", borderRadius: "10px", background: "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)", color: "white", display: "grid", placeItems: "center", boxShadow: "0 2px 8px rgba(59,130,246,0.3)" }}>
+                <Sparkles size={17} />
               </div>
-              <strong style={{ fontSize: "0.95rem", fontWeight: 800, color: "#ffffff" }}>Fifty AI Tutor</strong>
+              <div>
+                <strong style={{ fontSize: "0.95rem", fontWeight: 800, color: "#ffffff", display: "block", lineHeight: 1.1 }}>Fifty AI</strong>
+                <span style={{ fontSize: "0.68rem", color: "#a1a1aa" }}>Repetitor va tahlilchi</span>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => setTutorSidebarOpen(false)}
-              style={{ background: "transparent", border: "none", color: "#a1a1aa", cursor: "pointer", padding: "4px", display: "grid", placeItems: "center" }}
+              style={{ background: "transparent", border: "none", color: "#a1a1aa", cursor: "pointer", padding: "6px", display: "grid", placeItems: "center", borderRadius: "6px" }}
             >
               <X size={18} />
             </button>
           </div>
 
           {/* New Chat Button */}
-          <div style={{ padding: "12px 14px 6px" }}>
+          <div style={{ padding: "12px 14px 8px" }}>
             <button
               type="button"
               onClick={handleCreateNewChat}
@@ -7512,24 +7801,93 @@ export default function App() {
             </button>
           </div>
 
-          {/* Sessions List Header */}
-          <div style={{ padding: "10px 16px 4px", fontSize: "0.68rem", fontWeight: 800, color: "#71717a", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            Oxirgi suhbatlar ({tutorSessions.length})
+          {/* Search Chats Input */}
+          <div style={{ padding: "0 14px 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", background: "#212124", border: "1px solid #333338", borderRadius: "8px", padding: "6px 10px" }}>
+              <Search size={14} color="#71717a" />
+              <input
+                type="text"
+                value={tutorSearchQuery}
+                onChange={(e) => setTutorSearchQuery(e.target.value)}
+                placeholder="Suhbatlarni qidirish..."
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  color: "#f4f4f5",
+                  fontSize: "0.78rem",
+                  width: "100%",
+                }}
+              />
+              {tutorSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setTutorSearchQuery("")}
+                  style={{ background: "transparent", border: "none", color: "#71717a", cursor: "pointer", padding: 0 }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Nav Links (for Desktop) */}
+          <div style={{ padding: "0 10px 8px", display: "flex", flexDirection: "column", gap: "2px", borderBottom: "1px solid #27272a" }}>
+            {[
+              { id: "home", label: "Bosh sahifa", icon: <Home size={15} /> },
+              { id: "homeworks", label: "Uy vazifalari", icon: <BookOpen size={15} /> },
+              { id: "practice", label: "Takrorlash", icon: <PenTool size={15} /> },
+              { id: "profile", label: "Profilim", icon: <UserRound size={15} /> },
+            ].map((nav) => (
+              <button
+                key={nav.id}
+                type="button"
+                onClick={() => {
+                  navigateTo(nav.id as any);
+                  setTutorSidebarOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "9px",
+                  padding: "7px 10px",
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "6px",
+                  color: "#a1a1aa",
+                  fontSize: "0.8rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "background 0.15s ease",
+                }}
+              >
+                {nav.icon}
+                <span>{nav.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Recents Header */}
+          <div style={{ padding: "12px 16px 6px", fontSize: "0.68rem", fontWeight: 800, color: "#71717a", textTransform: "uppercase", letterSpacing: "0.6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>Oxirgi suhbatlar ({filteredSessions.length})</span>
           </div>
 
           {/* Sessions List */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "0 10px 12px", display: "flex", flexDirection: "column", gap: "4px" }}>
-            {tutorSessions.map((session) => {
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 8px 12px", display: "flex", flexDirection: "column", gap: "3px" }}>
+            {filteredSessions.map((session) => {
               const isActive = session.id === currentActiveSession.id;
+              const isEditing = editingSessionId === session.id;
+
               return (
                 <div
                   key={session.id}
-                  onClick={() => handleSelectChat(session.id)}
+                  onClick={() => !isEditing && handleSelectChat(session.id)}
                   style={{
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    padding: "9px 12px",
+                    padding: "8px 10px",
                     borderRadius: "8px",
                     background: isActive ? "#27272a" : "transparent",
                     color: isActive ? "#ffffff" : "#a1a1aa",
@@ -7540,29 +7898,73 @@ export default function App() {
                     border: isActive ? "1px solid #3f3f46" : "1px solid transparent",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-                    <MessageSquare size={14} color={isActive ? "var(--primary)" : "#71717a"} style={{ flexShrink: 0 }} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {session.title || "Yangi suhbat"}
-                    </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden", flex: 1 }}>
+                    <MessageSquare size={14} color={isActive ? "#38bdf8" : "#71717a"} style={{ flexShrink: 0 }} />
+                    {isEditing ? (
+                      <form onSubmit={(e) => handleSaveRename(session.id, e)} style={{ flex: 1, display: "flex", gap: "4px" }}>
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editingSessionTitle}
+                          onChange={(e) => setEditingSessionTitle(e.target.value)}
+                          onBlur={() => handleSaveRename(session.id)}
+                          style={{
+                            width: "100%",
+                            background: "#18181b",
+                            border: "1px solid #3b82f6",
+                            color: "white",
+                            borderRadius: "4px",
+                            padding: "2px 6px",
+                            fontSize: "0.78rem",
+                            outline: "none",
+                          }}
+                        />
+                      </form>
+                    ) : (
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {session.title || "Yangi suhbat"}
+                      </span>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => handleDeleteChat(session.id, e)}
-                    style={{
-                      background: "transparent",
-                      border: "none",
-                      color: "#71717a",
-                      cursor: "pointer",
-                      padding: "4px",
-                      display: "grid",
-                      placeItems: "center",
-                      borderRadius: "4px",
-                    }}
-                    title="Suhbatni o'chirish"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+
+                  {!isEditing && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                      <button
+                        type="button"
+                        onClick={(e) => handleStartRename(session.id, session.title || "Yangi suhbat", e)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#71717a",
+                          cursor: "pointer",
+                          padding: "3px",
+                          display: "grid",
+                          placeItems: "center",
+                          borderRadius: "4px",
+                        }}
+                        title="Nomini o'zgartirish"
+                      >
+                        <Edit size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteChat(session.id, e)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#71717a",
+                          cursor: "pointer",
+                          padding: "3px",
+                          display: "grid",
+                          placeItems: "center",
+                          borderRadius: "4px",
+                        }}
+                        title="O'chirish"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -7570,25 +7972,37 @@ export default function App() {
 
           {/* Sidebar Footer: User Card */}
           <div style={{ padding: "12px 14px", borderTop: "1px solid #27272a", background: "#18181b", display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#27272a", border: "1px solid #3f3f46", color: "var(--primary)", display: "grid", placeItems: "center", fontWeight: 700, fontSize: "0.85rem" }}>
+            <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: "#27272a", border: "1px solid #3f3f46", color: "#38bdf8", display: "grid", placeItems: "center", fontWeight: 700, fontSize: "0.85rem" }}>
               {initials(user?.full_name || "O'quvchi")}
             </div>
             <div style={{ overflow: "hidden", flex: 1 }}>
               <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "#ffffff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {user?.full_name || "O'quvchi"}
               </div>
-              <div style={{ fontSize: "0.68rem", color: "#10b981", display: "flex", alignItems: "center", gap: "4px" }}>
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981" }} />
+              <div style={{ fontSize: "0.68rem", color: "#10b981", display: "flex", alignItems: "center", gap: "5px" }}>
+                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
                 AI Standart • Faol
               </div>
             </div>
           </div>
         </aside>
 
-        {/* Main Chat Area */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", background: "#f8fafc", overflow: "hidden" }}>
+        {/* ── Main Chat Area (Anthropic Claude Aesthetic) ── */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", background: "#1e1e1e", overflow: "hidden", position: "relative" }}>
           {/* Top Navbar */}
-          <div style={{ padding: "10px 16px", background: "white", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 10 }}>
+          <div
+            style={{
+              padding: "10px 18px",
+              background: "#18181b",
+              borderBottom: "1px solid #27272a",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              position: "sticky",
+              top: 0,
+              zIndex: 10,
+            }}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: "10px", overflow: "hidden" }}>
               <button
                 type="button"
@@ -7596,10 +8010,10 @@ export default function App() {
                 style={{
                   width: "36px",
                   height: "36px",
-                  borderRadius: "10px",
-                  background: tutorSidebarOpen ? "#18181b" : "var(--background)",
-                  color: tutorSidebarOpen ? "white" : "var(--text-main)",
-                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  background: "#27272a",
+                  color: "#f4f4f5",
+                  border: "1px solid #3f3f46",
                   display: "grid",
                   placeItems: "center",
                   cursor: "pointer",
@@ -7611,58 +8025,84 @@ export default function App() {
               </button>
 
               <div style={{ overflow: "hidden" }}>
-                <h2 style={{ margin: 0, fontSize: "0.92rem", fontWeight: 800, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {currentActiveSession.title || "AI izoh va yordam"}
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: "0.95rem",
+                    fontWeight: 700,
+                    color: "#ffffff",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => handleStartRename(currentActiveSession.id, currentActiveSession.title)}
+                  title="Nomini o'zgartirish"
+                >
+                  {currentActiveSession.title || "AI izoh va repetitor"}
                 </h2>
-                <div style={{ fontSize: "0.68rem", color: "var(--secondary)", fontWeight: 700, display: "flex", alignItems: "center", gap: "4px" }}>
-                  <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--secondary)" }} />
-                  AI Repetitor • Onlayn
+                <div style={{ fontSize: "0.68rem", color: "#10b981", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+                  <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#10b981" }} />
+                  Opus / Gemini 2.5 • Avto
                 </div>
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleCreateNewChat}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "5px",
-                padding: "6px 12px",
-                borderRadius: "10px",
-                background: "var(--primary)",
-                color: "white",
-                border: "none",
-                fontSize: "0.78rem",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-            >
-              <Plus size={14} />
-              <span>Yangi</span>
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={handleCreateNewChat}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  background: "#27272a",
+                  border: "1px solid #3f3f46",
+                  color: "#ffffff",
+                  fontSize: "0.78rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  transition: "background 0.15s ease",
+                }}
+              >
+                <Plus size={14} />
+                <span>Yangi</span>
+              </button>
+            </div>
           </div>
 
-          {/* Real Homework Mistake Context (ONLY IF real mistakes exist!) */}
+          {/* Homework Mistake Banner (ONLY IF real mistakes exist!) */}
           {tutorMistakes.length > 0 && (
-            <div style={{ padding: "10px 16px", background: "rgba(239, 68, 68, 0.04)", borderBottom: "1px solid rgba(239, 68, 68, 0.15)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+            <div
+              style={{
+                padding: "8px 16px",
+                background: "rgba(239, 68, 68, 0.12)",
+                borderBottom: "1px solid rgba(239, 68, 68, 0.25)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+              }}
+            >
               <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden" }}>
-                <AlertCircle size={15} color="var(--danger)" style={{ flexShrink: 0 }} />
-                <div style={{ fontSize: "0.78rem", color: "var(--danger)", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {tutorMistakes[0].label}: {tutorMistakes[0].problems[0] ? `Masala #${tutorMistakes[0].problems[0]}` : "Xato"}
+                <AlertCircle size={15} color="#ef4444" style={{ flexShrink: 0 }} />
+                <div style={{ fontSize: "0.78rem", color: "#fca5a5", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  Uy vazifangizdagi xato: <strong>{tutorMistakes[0].label}</strong>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => handleQuickQuestion(`Mening "${tutorMistakes[0].label}" bo'yicha xatoimni bosqichma-bosqich tushuntir`)}
                 style={{
-                  background: "white",
-                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                  background: "rgba(239, 68, 68, 0.2)",
+                  border: "1px solid rgba(239, 68, 68, 0.4)",
                   borderRadius: "6px",
-                  padding: "3px 8px",
-                  fontSize: "0.7rem",
+                  padding: "4px 10px",
+                  fontSize: "0.72rem",
                   fontWeight: 700,
-                  color: "var(--danger)",
+                  color: "#fca5a5",
                   cursor: "pointer",
                   whiteSpace: "nowrap",
                 }}
@@ -7672,27 +8112,51 @@ export default function App() {
             </div>
           )}
 
-          {/* Message Stream */}
-          <div style={{ flex: 1, padding: "16px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "14px" }}>
+          {/* ── Scrollable Message Feed ── */}
+          <div
+            style={{
+              flex: 1,
+              padding: "16px 20px 100px",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: "20px",
+              maxWidth: "840px",
+              width: "100%",
+              margin: "0 auto",
+            }}
+          >
             {/* If empty or only 1 greeting message: show Claude.ai-style welcome cards */}
             {currentActiveSession.messages.length <= 1 && (
-              <div style={{ margin: "auto 0", textAlign: "center", padding: "12px 0" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "16px", background: "linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%)", color: "var(--primary)", display: "grid", placeItems: "center", margin: "0 auto 12px" }}>
-                  <Sparkles size={26} />
+              <div style={{ margin: "auto 0", textAlign: "center", padding: "24px 0" }}>
+                <div
+                  style={{
+                    width: "56px",
+                    height: "56px",
+                    borderRadius: "18px",
+                    background: "linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%)",
+                    color: "#60a5fa",
+                    display: "grid",
+                    placeItems: "center",
+                    margin: "0 auto 14px",
+                    border: "1px solid rgba(59, 130, 246, 0.3)",
+                  }}
+                >
+                  <Sparkles size={28} />
                 </div>
-                <h3 style={{ margin: "0 0 6px", fontSize: "1.1rem", fontWeight: 800, color: "var(--text-main)" }}>
-                  Salom! Men sizning shaxsiy AI repetitoringizman 👋
+                <h3 style={{ margin: "0 0 8px", fontSize: "1.2rem", fontWeight: 800, color: "#ffffff" }}>
+                  Salom, {user?.full_name?.split(" ")[0] || "O'quvchi"}! Qanday yordam bera olaman? 👋
                 </h3>
-                <p style={{ margin: "0 auto 20px", fontSize: "0.82rem", color: "var(--text-muted)", maxWidth: "420px", lineHeight: 1.5 }}>
-                  Matematika darslari, uy vazifasidagi xatolaringiz va formulalar bo'yicha istalgan savolingizni bering. Birgalikda bosqichma-bosqich o'rganamiz!
+                <p style={{ margin: "0 auto 24px", fontSize: "0.85rem", color: "#a1a1aa", maxWidth: "460px", lineHeight: 1.6 }}>
+                  Matematika darslari, uy vazifasidagi xatolaringiz, murakkab formulalar va misollar bo'yicha savol bering. Birgalikda bosqichma-bosqich o'rganamiz!
                 </p>
 
-                {/* Quick starter chips grid */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", maxWidth: "480px", margin: "0 auto", textAlign: "left" }}>
+                {/* Claude-style 4 Starter Chips Grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", maxWidth: "520px", margin: "0 auto", textAlign: "left" }}>
                   {[
                     { label: "Oxirgi xatolarimni tushuntir", icon: "🔍", prompt: "Oxirgi uy vazifamdagi xatolarni bosqichma-bosqich tushuntirib ber" },
                     { label: "Formulalarni eslash sirlari", icon: "📐", prompt: "Kvadrat tenglamalar formulalarini qanday oson eslab qolish mumkin?" },
-                    { label: "O'xshash mini-misol ber", icon: "✍️", prompt: "Menga o'rganishim uchun kvadrat tenglamaga oid bitta sodda misol ber" },
+                    { label: "O'xshash mini-misol ber", icon: "✍️", prompt: "Menga o'rganishim uchun bitta qiziqarli mini-misol ber" },
                     { label: "Qaysi mavzuni takrorlash kerak?", icon: "🎯", prompt: "Mening natijalarimga qarab, qaysi mavzuni ko'proq takrorlashim kerak?" },
                   ].map((card) => (
                     <button
@@ -7701,174 +8165,382 @@ export default function App() {
                       disabled={busyAction === "student-tutor"}
                       onClick={() => handleQuickQuestion(card.prompt)}
                       style={{
-                        padding: "10px 12px",
-                        background: "white",
-                        border: "1px solid var(--border)",
+                        padding: "12px 14px",
+                        background: "#26262a",
+                        border: "1px solid #38383e",
                         borderRadius: "12px",
-                        fontSize: "0.78rem",
-                        color: "var(--text-main)",
+                        fontSize: "0.8rem",
+                        color: "#f4f4f5",
                         cursor: "pointer",
                         fontWeight: 600,
                         display: "flex",
                         flexDirection: "column",
-                        gap: "4px",
-                        boxShadow: "0 2px 6px rgba(0,0,0,0.02)",
+                        gap: "6px",
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                         transition: "all 0.15s ease",
+                        textAlign: "left",
                       }}
                     >
-                      <span style={{ fontSize: "1rem" }}>{card.icon}</span>
-                      <span style={{ lineHeight: 1.3 }}>{card.label}</span>
+                      <span style={{ fontSize: "1.1rem" }}>{card.icon}</span>
+                      <span style={{ lineHeight: 1.35, color: "#e4e4e7" }}>{card.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Message bubbles */}
+            {/* Message Stream */}
             {currentActiveSession.messages.map((msg, index) => {
               const isUser = msg.sender === "user";
+              const isLiked = !!likedMessages[`msg_${index}`];
+
               return (
-                <div key={index} style={{ alignSelf: isUser ? "flex-end" : "flex-start", maxWidth: isUser ? "82%" : "90%" }}>
-                  <div
-                    style={{
-                      background: isUser ? "var(--primary)" : "white",
-                      color: isUser ? "white" : "var(--text-main)",
-                      padding: "12px 16px",
-                      borderRadius: "16px",
-                      borderBottomLeftRadius: isUser ? "16px" : "4px",
-                      borderBottomRightRadius: isUser ? "4px" : "16px",
-                      border: isUser ? "none" : "1px solid var(--border)",
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.03)",
-                      fontSize: "0.88rem",
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {!isUser && (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px", borderBottom: "1px solid #f1f5f9", paddingBottom: "4px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.72rem", fontWeight: 800, color: "var(--primary)" }}>
-                          <Sparkles size={12} />
-                          Fifty AI Tutor
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleCopySummary(msg.text, `msg_${index}`)}
-                          style={{
-                            background: "transparent",
-                            border: "none",
-                            color: "var(--text-muted)",
-                            cursor: "pointer",
-                            fontSize: "0.7rem",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "3px",
-                          }}
-                        >
-                          {copiedSummaryId === `msg_${index}` ? <Check size={11} color="var(--secondary)" /> : <Copy size={11} />}
-                          <span>{copiedSummaryId === `msg_${index}` ? "Nusxalandi" : "Nusxa"}</span>
-                        </button>
+                <div
+                  key={index}
+                  style={{
+                    alignSelf: isUser ? "flex-end" : "flex-start",
+                    maxWidth: isUser ? "85%" : "100%",
+                    width: isUser ? "auto" : "100%",
+                  }}
+                >
+                  {isUser ? (
+                    // User Message
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                      <div
+                        style={{
+                          background: "#2b2b30",
+                          color: "#ffffff",
+                          padding: "10px 16px",
+                          borderRadius: "18px",
+                          borderBottomRightRadius: "4px",
+                          border: "1px solid #3f3f46",
+                          fontSize: "0.91rem",
+                          lineHeight: 1.6,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                        }}
+                      >
+                        {msg.text}
                       </div>
-                    )}
-                    {msg.text}
-                  </div>
-                  <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "4px", marginLeft: "4px", marginRight: "4px", textAlign: isUser ? "right" : "left" }}>
-                    {msg.time || "Hozir"}
-                  </div>
+                      <span style={{ fontSize: "0.65rem", color: "#71717a", marginTop: "4px", marginRight: "6px" }}>
+                        {msg.time || "Hozir"}
+                      </span>
+                    </div>
+                  ) : (
+                    // Claude-style Assistant Message
+                    <div
+                      style={{
+                        background: "transparent",
+                        color: "#f4f4f5",
+                        padding: "4px 0",
+                        width: "100%",
+                      }}
+                    >
+                      {/* Assistant Header */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                        <div style={{ width: "22px", height: "22px", borderRadius: "6px", background: "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)", color: "white", display: "grid", placeItems: "center" }}>
+                          <Sparkles size={12} />
+                        </div>
+                        <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#ffffff" }}>Fifty AI</span>
+                        <span style={{ fontSize: "0.68rem", color: "#71717a" }}>{msg.time || "Hozir"}</span>
+                      </div>
+
+                      {/* Assistant Body rendered with Claude Markdown */}
+                      <div style={{ paddingLeft: "30px" }}>
+                        {renderClaudeMarkdown(msg.text, index)}
+
+                        {/* Action buttons under response */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "12px", borderTop: "1px solid #27272a", paddingTop: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => handleCopySummary(msg.text, `msg_${index}`)}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#a1a1aa",
+                              cursor: "pointer",
+                              fontSize: "0.72rem",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "4px 8px",
+                              borderRadius: "6px",
+                              transition: "color 0.15s ease",
+                            }}
+                          >
+                            {copiedSummaryId === `msg_${index}` ? <Check size={13} color="#10b981" /> : <Copy size={13} />}
+                            <span>{copiedSummaryId === `msg_${index}` ? "Nusxalandi" : "Nusxa olish"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLikedMessages((prev) => ({
+                                ...prev,
+                                [`msg_${index}`]: !prev[`msg_${index}`],
+                              }))
+                            }
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: isLiked ? "#10b981" : "#a1a1aa",
+                              cursor: "pointer",
+                              fontSize: "0.72rem",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "4px 8px",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <ThumbsUp size={13} />
+                            <span>{isLiked ? "Foydali!" : "Foydali"}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRegenerate(index)}
+                            disabled={busyAction === "student-tutor"}
+                            style={{
+                              background: "transparent",
+                              border: "none",
+                              color: "#a1a1aa",
+                              cursor: "pointer",
+                              fontSize: "0.72rem",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "4px 8px",
+                              borderRadius: "6px",
+                            }}
+                          >
+                            <RotateCw size={13} />
+                            <span>Qayta tahlil</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
 
             {/* Thinking / typing indicator */}
             {busyAction === "student-tutor" && (
-              <div style={{ alignSelf: "flex-start", background: "white", padding: "10px 16px", borderRadius: "16px", border: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "8px", boxShadow: "0 2px 8px rgba(0,0,0,0.03)" }}>
-                <RefreshCcw size={14} color="var(--primary)" style={{ animation: "spin 1.2s linear infinite" }} />
-                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>
-                  AI javob yozmoqda...
-                </span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", paddingLeft: "30px", margin: "6px 0" }}>
+                <div style={{ width: "22px", height: "22px", borderRadius: "6px", background: "linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)", color: "white", display: "grid", placeItems: "center" }}>
+                  <Sparkles size={12} style={{ animation: "spin 2s linear infinite" }} />
+                </div>
+                <div style={{ background: "#26262a", padding: "8px 14px", borderRadius: "12px", border: "1px solid #38383e", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <RefreshCcw size={13} color="#60a5fa" style={{ animation: "spin 1.2s linear infinite" }} />
+                  <span style={{ fontSize: "0.8rem", color: "#cbd5e1", fontWeight: 600 }}>
+                    AI fikrlamoqda va javob tayyorlamoqda...
+                  </span>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Quick prompt suggestions bar */}
-          <div style={{ padding: "8px 14px", background: "white", display: "flex", gap: "8px", overflowX: "auto", borderTop: "1px solid var(--border)", WebkitOverflowScrolling: "touch" }}>
-            {[
-              "Oxirgi xatolarimni bosqichma-bosqich tushuntir",
-              "To'g'ri formulani ko'rsat va izohla",
-              "Menga o'xshash sodda mini-misol ber",
-              "Qaysi mavzuni takrorlashim kerak?",
-            ].map((promptText) => (
-              <button
-                key={promptText}
-                type="button"
-                disabled={busyAction === "student-tutor"}
-                onClick={() => handleQuickQuestion(promptText)}
-                style={{
-                  whiteSpace: "nowrap",
-                  padding: "6px 12px",
-                  borderRadius: "16px",
-                  background: "var(--background)",
-                  border: "1px solid var(--border)",
-                  fontSize: "0.76rem",
-                  color: "var(--text-main)",
-                  cursor: "pointer",
-                  fontWeight: 600,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  flexShrink: 0,
-                }}
-              >
-                <Sparkles size={11} color="var(--primary)" />
-                {promptText}
-              </button>
-            ))}
-          </div>
+          {/* ── Quick Formulas & Topics Modal / Popup ── */}
+          {showFormulaPicker && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: "95px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: "92%",
+                maxWidth: "680px",
+                background: "#26262a",
+                border: "1px solid #3f3f46",
+                borderRadius: "16px",
+                padding: "14px 16px",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+                zIndex: 50,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#ffffff", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Sparkles size={14} color="#38bdf8" />
+                  Tezkor formulalar va savollar
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowFormulaPicker(false)}
+                  style={{ background: "transparent", border: "none", color: "#a1a1aa", cursor: "pointer" }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
 
-          {/* Input Box */}
-          <form onSubmit={handleSendTutor} style={{ padding: "10px 14px 14px", background: "white", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <input
-                type="text"
-                value={studentTutorInput}
-                onChange={(e) => setStudentTutorInput(e.target.value)}
-                placeholder="Xato yoki mavzu bo'yicha savol yozing..."
-                disabled={busyAction === "student-tutor"}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                {[
+                  { label: "Kvadrat tenglama formulasi", text: "Kvadrat tenglamada ax^2 + bx + c = 0 diskriminant topish va ildizlarni hisoblash qoidasini ko'rsat" },
+                  { label: "Pifagor teoremasi", text: "Pifagor teoremasi a^2 + b^2 = c^2 to'g'ri burchakli uchburchakda qanday qo'llaniladi?" },
+                  { label: "Qisqa ko'paytirish formulalari", text: "Qisqa ko'paytirish formulalarini (a+b)^2, a^2 - b^2 eslab qolish usullarini tushuntir" },
+                  { label: "Foiz va nisbatlar", text: "Sonning foizini topish va foiz bo'yicha sonni aniqlash usulini tushuntir" },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      setStudentTutorInput(item.text);
+                      setShowFormulaPicker(false);
+                    }}
+                    style={{
+                      padding: "8px 10px",
+                      background: "#1e1e1e",
+                      border: "1px solid #38383e",
+                      borderRadius: "8px",
+                      color: "#e4e4e7",
+                      fontSize: "0.75rem",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Signature Claude.ai Floating Bottom Input Bar ── */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: "8px 16px 14px",
+              background: "linear-gradient(180deg, transparent 0%, #1e1e1e 40%)",
+              zIndex: 30,
+            }}
+          >
+            <div style={{ maxWidth: "760px", margin: "0 auto" }}>
+              <form
+                onSubmit={handleSendTutor}
                 style={{
-                  flex: 1,
-                  padding: "12px 18px",
-                  borderRadius: "24px",
-                  border: "1px solid var(--border)",
-                  background: "var(--background)",
-                  fontSize: "0.88rem",
-                  outline: "none",
-                }}
-              />
-              <button
-                type="submit"
-                disabled={busyAction === "student-tutor" || !studentTutorInput.trim()}
-                style={{
-                  width: "44px",
-                  height: "44px",
-                  borderRadius: "50%",
-                  background: studentTutorInput.trim() ? "var(--primary)" : "var(--border)",
-                  color: "white",
-                  border: "none",
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: studentTutorInput.trim() ? "pointer" : "not-allowed",
-                  flexShrink: 0,
-                  transition: "all 0.2s ease",
+                  background: "#26262a",
+                  border: "1px solid #3f3f46",
+                  borderRadius: "18px",
+                  padding: "10px 14px 8px",
+                  boxShadow: "0 6px 24px rgba(0,0,0,0.35)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                  transition: "border-color 0.2s ease",
                 }}
               >
-                {busyAction === "student-tutor" ? (
-                  <RefreshCcw size={18} style={{ animation: "spin 1.2s linear infinite" }} />
-                ) : (
-                  <Send size={18} style={{ marginLeft: "-2px" }} />
-                )}
-              </button>
+                {/* Auto-growing Textarea */}
+                <textarea
+                  rows={2}
+                  value={studentTutorInput}
+                  onChange={(e) => setStudentTutorInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendTutor();
+                    }
+                  }}
+                  placeholder="Reply... Savolingizni yoki tushunmagan misolingizni yozing..."
+                  disabled={busyAction === "student-tutor"}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    outline: "none",
+                    color: "#ffffff",
+                    fontSize: "0.92rem",
+                    lineHeight: 1.5,
+                    resize: "none",
+                    width: "100%",
+                    fontFamily: "inherit",
+                  }}
+                />
+
+                {/* Bottom row inside input box */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "4px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowFormulaPicker(!showFormulaPicker)}
+                      style={{
+                        width: "28px",
+                        height: "28px",
+                        borderRadius: "50%",
+                        background: "#323238",
+                        border: "1px solid #44444c",
+                        color: "#a1a1aa",
+                        display: "grid",
+                        placeItems: "center",
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                      title="Tezkor formulalar qo'shish"
+                    >
+                      <Plus size={14} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleQuickQuestion("Oxirgi uy vazifamdagi xatoni tushuntir")}
+                      style={{
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        background: "#323238",
+                        border: "1px solid #44444c",
+                        color: "#cbd5e1",
+                        fontSize: "0.7rem",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                      }}
+                    >
+                      Xatoni tahlil
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{ fontSize: "0.68rem", color: "#71717a", fontWeight: 600 }}>
+                      Opus • Avto
+                    </span>
+
+                    {/* Claude-style Green Round Send Button */}
+                    <button
+                      type="submit"
+                      disabled={busyAction === "student-tutor" || !studentTutorInput.trim()}
+                      style={{
+                        width: "32px",
+                        height: "32px",
+                        borderRadius: "50%",
+                        background: studentTutorInput.trim() ? "#10b981" : "#323238",
+                        color: studentTutorInput.trim() ? "#ffffff" : "#71717a",
+                        border: "none",
+                        display: "grid",
+                        placeItems: "center",
+                        cursor: studentTutorInput.trim() ? "pointer" : "default",
+                        transition: "all 0.2s ease",
+                        boxShadow: studentTutorInput.trim() ? "0 2px 10px rgba(16, 185, 129, 0.4)" : "none",
+                      }}
+                      title="Yuborish (Enter)"
+                    >
+                      {busyAction === "student-tutor" ? (
+                        <RefreshCcw size={15} style={{ animation: "spin 1.2s linear infinite" }} />
+                      ) : (
+                        <ArrowUp size={16} strokeWidth={2.5} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              {/* Claude-style Disclaimer note */}
+              <div style={{ textAlign: "center", marginTop: "6px", fontSize: "0.68rem", color: "#71717a" }}>
+                Fifty AI xatolarga yo'l qo'yishi mumkin. Muhim hisob-kitoblarni tekshirib ko'ring.
+              </div>
             </div>
-          </form>
+          </div>
         </div>
       </div>
     );
